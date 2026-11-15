@@ -211,4 +211,5 @@ public class SetController {
       setService.updateSubsetsFromSuper(user.getUsername(), editRequest.getEntity(), editRequest.getNamespace());
     }
   }
+
 }

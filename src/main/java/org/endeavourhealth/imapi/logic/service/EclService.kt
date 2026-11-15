@@ -1,6 +1,7 @@
 package org.endeavourhealth.imapi.logic.service
 
 import org.endeavourhealth.imapi.dataaccess.SetRepository
+import org.endeavourhealth.imapi.logic.reasoner.MembersToEcl
 import org.endeavourhealth.imapi.model.iml.Concept
 import org.endeavourhealth.imapi.model.iml.Page
 import org.endeavourhealth.imapi.model.imq.*
@@ -141,4 +142,10 @@ class EclService {
     IMQToECL().getECLFromQuery(eclQuery)
     return eclQuery
   }
+
+  fun getEclFromMembers(iri: String?): String? {
+    val ecl = MembersToEcl().getEclFromMembers(iri)
+    return ecl
+  }
+
 }

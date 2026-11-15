@@ -7,19 +7,14 @@ import org.endeavourhealth.imapi.model.imq.Node;
 import java.util.*;
 import java.util.stream.Collectors;
 
-public class SetDefinitionCompressor {
+public class MembersToEcl {
   private SetRepository setRepository= new SetRepository();
 
-public String getSetDefinition(String iri) {
+public String getEclFromMembers(String iri) {
   Pageable<Node> memberNodes= setRepository.getMembers(iri,false,1,10000);
   if (memberNodes.getResult()==null)
     return "";
   Set<String> members= memberNodes.getResult().stream().map(Node::getIri).collect(Collectors.toSet());
-  level0(iri,members);
-  return "";
-}
-
-  private void level0(String iri,Set<String> members) {
     Set<String> inclusionAncestors = new HashSet<>();
     Set<String> exclusions = new HashSet<>();
     Set<String> newMembers = new HashSet<>();
@@ -46,6 +41,35 @@ public String getSetDefinition(String iri) {
       levelN(members,inclusionAncestors,exclusions);
       beforeSize = members.size();
     }
+    setRepository.removeInactives(iri,members);
+   StringBuilder ecl= new StringBuilder();
+    if (!exclusions.isEmpty())
+      ecl.append("(");
+    int count=-1;
+    for (String ancestor:inclusionAncestors){
+      count++;
+      ancestor= ancestor.substring(ancestor.lastIndexOf("#")+1);
+      if (count>0) ecl.append("OR ");
+      ecl.append("<< ").append(ancestor).append("\n");
+    }
+    for (String member:members){
+      member= member.substring(member.lastIndexOf("#")+1);
+      ecl.append("OR ").append(member).append("\n");
+    }
+    if (!exclusions.isEmpty()) {
+      ecl.append(")\n");
+      ecl.append("MINUS (");
+      count = -1;
+      for (String exclude : exclusions) {
+        exclude = exclude.substring(exclude.lastIndexOf("#") + 1);
+        count++;
+        if (count > 0)
+          ecl.append("OR ");
+        ecl.append("<<").append(exclude).append("\n");
+      }
+      ecl.append(")");
+    }
+    return ecl.toString();
   }
   private void levelN(Set<String> members,Set<String> inclusionAncestors,Set<String> exclusions) {
   Map<String,Map<String,Set<String>>> levelNParents= setRepository.getLevelNParentInclusions(members);

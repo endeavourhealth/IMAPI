@@ -6,10 +6,8 @@ import org.eclipse.rdf4j.query.BindingSet
 import org.eclipse.rdf4j.query.TupleQuery
 import org.endeavourhealth.imapi.dataaccess.databases.IMDB
 import org.endeavourhealth.imapi.dataaccess.databases.IMDB.Companion.getConnection
-import org.endeavourhealth.imapi.dataaccess.helpers.SparqlHelper.inList
 import org.endeavourhealth.imapi.dataaccess.helpers.SparqlHelper.value
 import org.endeavourhealth.imapi.dataaccess.helpers.SparqlHelper.valueList
-import org.endeavourhealth.imapi.logic.reasoner.SetDefinitionCompressor
 import org.endeavourhealth.imapi.model.Pageable
 import org.endeavourhealth.imapi.model.iml.Concept
 import org.endeavourhealth.imapi.model.iml.Page
@@ -1102,6 +1100,7 @@ class SetRepository {
         ?parent rdfs:label ?parentLabel .
 
         ?set im:hasMember ?inclusion .
+        ?inclusion im:status im:Active.
         ?inclusion im:isA ?parent ;
                    im:scheme sn: ;
                    rdfs:label ?inclusionLabel .
@@ -1151,6 +1150,7 @@ class SetRepository {
         ?member rdfs:subClassOf ?parent.
         ?parent rdfs:label ?parentLabel.
         ?inclusion im:isA ?parent.
+        ?inclusion im:status im:Active.
         FILTER (?inclusion = ?member)
         FILTER NOT EXISTS {
           ?member rdfs:subClassOf ?ancestor .
@@ -1210,6 +1210,26 @@ class SetRepository {
       }
     }
 
+  }
+
+  fun removeInactives(iri: String,members: MutableSet<String>) {
+    val spq="""
+      select ?inactive
+      where {
+       ${value("set",iri)}
+       ?set im:hasMember ?inactive.
+        ?inactive im:status im:Inactive.
+      }
+    """.trimIndent()
+    getConnection().use { conn ->
+      val qry = conn.prepareTupleSparql(spq)
+      qry.evaluate().use { rs ->
+        while (rs.hasNext()) {
+          val bs = rs.next()
+          members.remove(bs.getValue("inactive").stringValue() as String)
+        }
+      }
+    }
   }
 
   companion object {

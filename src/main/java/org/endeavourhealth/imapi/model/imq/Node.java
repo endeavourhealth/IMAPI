@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import com.fasterxml.jackson.annotation.JsonSetter;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Consumer;
 
 @JsonPropertyOrder({"descendantsOrSelfOf", "parameter", "iri", "type", "set", "qualifier", "query"})
@@ -18,10 +20,32 @@ public class Node extends Element {
   private String node;
   private String qualifier;
   private boolean cohort;
+  private List<IriLD> in;
 
   public Node() {
   }
 
+  public List<IriLD> getIn() {
+    return in;
+  }
+
+  public Node setIn(List<IriLD> in) {
+    this.in = in;
+    return this;
+  }
+  public Node addIn (IriLD in){
+      if (this.in == null) {
+        this.in = new ArrayList<>();
+      }
+      this.in.add(in);
+      return this;
+  }
+  public Node in (Consumer < IriLD > builder) {
+      IriLD in = new IriLD();
+      addIn(in);
+      builder.accept(in);
+      return this;
+  }
 
 
   public Node setEntails(Entail entails){
