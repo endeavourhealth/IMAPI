@@ -21,6 +21,7 @@ class IMQtoSQLConverterStepDefs() {
   private val entityRepository = EntityRepository()
   private val featureTableExporter = IMQFeatureTableExporter()
   private var failures: List<ConversionFailure> = emptyList()
+  private var attempted = 0
 
   private data class ConversionFailure(val iri: String, val label: String?, val message: String?)
 
@@ -60,6 +61,7 @@ class IMQtoSQLConverterStepDefs() {
 
   @Then("SQL should be generated successfully for all of them")
   fun sqlShouldBeGeneratedSuccessfullyForAllOfThem() {
+    println("IMQ to SQL: converted ${attempted - failures.size} of $attempted queries (${failures.size} failed)")
     if (failures.isNotEmpty()) {
       val byMessage = failures.groupBy { it.message ?: "unknown" }
       println("--- Failures by unique error (${byMessage.size} unique) ---")
@@ -75,6 +77,7 @@ class IMQtoSQLConverterStepDefs() {
 
   private fun runConversionForAll(entities: List<TTIriRef>) {
     assertTrue(entities.isNotEmpty(), "Expected at least one query iri to be returned")
+    attempted = entities.size
     failures = entities.mapNotNull { entity ->
       try {
         val queryRequest = QueryRequest().setQuery(Query().setIri(entity.iri))

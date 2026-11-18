@@ -186,6 +186,7 @@ tasks.test {
 }
 
 tasks.register("imqTests", Test::class.java) {
+  outputs.upToDateWhen { false }
   testClassesDirs = sourceSets["test"].output.classesDirs
   classpath = sourceSets["test"].runtimeClasspath
   useJUnitPlatform {
@@ -194,6 +195,7 @@ tasks.register("imqTests", Test::class.java) {
 }
 
 tasks.register("imqQOFQueriesTest", Test::class.java) {
+  outputs.upToDateWhen { false }
   testClassesDirs = sourceSets["test"].output.classesDirs
   classpath = sourceSets["test"].runtimeClasspath
   useJUnitPlatform {
@@ -202,6 +204,7 @@ tasks.register("imqQOFQueriesTest", Test::class.java) {
 }
 
 tasks.register("imqSMHQueriesTest", Test::class.java) {
+  outputs.upToDateWhen { false }
   testClassesDirs = sourceSets["test"].output.classesDirs
   classpath = sourceSets["test"].runtimeClasspath
   useJUnitPlatform {
@@ -210,6 +213,7 @@ tasks.register("imqSMHQueriesTest", Test::class.java) {
 }
 
 tasks.register("imqREGQueriesTest", Test::class.java) {
+  outputs.upToDateWhen { false }
   testClassesDirs = sourceSets["test"].output.classesDirs
   classpath = sourceSets["test"].runtimeClasspath
   useJUnitPlatform {
