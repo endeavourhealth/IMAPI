@@ -1,22 +1,24 @@
 package org.endeavourhealth.imapi.logic.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import org.endeavourhealth.imapi.utility.SharedObjectMapper;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.endeavourhealth.imapi.dataaccess.DataModelRepository;
 import org.endeavourhealth.imapi.dataaccess.EntityRepository;
 import org.endeavourhealth.imapi.dataaccess.QueryRepository;
 import org.endeavourhealth.imapi.errorhandling.SQLConversionException;
-import org.endeavourhealth.imapi.queryengine.LogicOptimizer;
 import org.endeavourhealth.imapi.model.iml.Indicator;
 import org.endeavourhealth.imapi.model.imq.*;
 import org.endeavourhealth.imapi.model.requests.QueryRequest;
-import org.endeavourhealth.imapi.transforms.imqtosql.IMQtoSQLConverterKotlin;
 import org.endeavourhealth.imapi.model.sql.SubQueryDependency;
-import org.endeavourhealth.imapi.model.tripletree.*;
+import org.endeavourhealth.imapi.model.tripletree.TTBundle;
+import org.endeavourhealth.imapi.model.tripletree.TTEntity;
+import org.endeavourhealth.imapi.model.tripletree.TTIriRef;
+import org.endeavourhealth.imapi.model.tripletree.TTValue;
+import org.endeavourhealth.imapi.queryengine.LogicOptimizer;
 import org.endeavourhealth.imapi.queryengine.QueryDescriptor;
 import org.endeavourhealth.imapi.queryengine.QueryValidator;
+import org.endeavourhealth.imapi.transforms.imqtosql.IMQtoSQLConverterKotlin;
+import org.endeavourhealth.imapi.utility.SharedObjectMapper;
 import org.endeavourhealth.imapi.vocabulary.*;
 import org.springframework.stereotype.Component;
 
@@ -112,7 +114,7 @@ public class QueryService {
     if (cohort != null) {
       Query cohortQuery = cohort.get(iri(IM.DEFINITION)).asLiteral().objectValue(Query.class);
       defaultQuery.setTypeOf(cohortQuery.getTypeOf());
-      defaultQuery.setIs(new Node().setIri(cohort.getIri()).setMemberOf(true));
+      defaultQuery.setIs(new Node().setIri(cohort.getIri()).setEntails(Entail.memberOf));
       return defaultQuery;
     } else return null;
   }
@@ -318,37 +320,29 @@ public class QueryService {
     return new QueryRepository().getSemanticMapsForSourceIri(sourceIri);
   }
 
-
   public void checkDependency(TTEntity report, Query query) {
-    if (query.getRule() != null) {
-      for (Query subQuery : query.getRule()) {
-        if (subQuery.getIs() != null) {
-          Node node = subQuery.getIs();
-          report.addObject(iri(IM.DEPENDENT_ON), iri(node.getIri()));
+    if (query == null) return;
+    if (query.getIs()!=null){
+        if (query.getIs().isCohort()){
+          report.addObject(iri(IM.DENOMINATOR), iri(query.getIs().getIri()));
         }
-        checkDependency(report, subQuery);
+      }
+    checkClauseDependency(report, query);
+  }
+  public void checkClauseDependency(TTEntity report, Query query) {
+    if (query == null) return;
+    Node node = query.getIs();
+    if (node != null && node.getIri() != null) {
+      report.addObject(iri(IM.DEPENDENT_ON), iri(node.getIri()));
+    }
+    for (List<Query> subQueries : Arrays.asList(query.getRule(), query.getAnd(), query.getOr(), query.getWith(), query.getUnion(), query.getColumnGroup())) {
+      if (subQueries != null) {
+        for (Query subQuery : subQueries) {
+          checkClauseDependency(report, subQuery);
+        }
       }
     }
-    if (query.getColumnGroup() != null) {
-      for (Query subQuery : query.getColumnGroup()) {
-        checkDependency(report, subQuery);
-      }
-    }
-    if (query.getAnd() != null) {
-      for (Query subQuery : query.getAnd()) {
-        checkDependency(report, subQuery);
-      }
-    }
-    if (query.getOr() != null) {
-      for (Query subQuery : query.getOr()) {
-        checkDependency(report, subQuery);
-      }
-    }
-    if (query.getEach() != null) {
-      for (Query subQuery : query.getEach()) {
-        checkDependency(report, subQuery);
-      }
-    }
+    checkClauseDependency(report, query.getThen());
   }
 
 

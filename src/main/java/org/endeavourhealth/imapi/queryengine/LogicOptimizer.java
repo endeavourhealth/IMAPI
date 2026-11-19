@@ -192,7 +192,7 @@ public class LogicOptimizer {
 
   private static void logicalPath(Path path) {
     if (path == null) return;
-    path.setNode(null);
+    path.setAs(null);
     if (path.getPath() != null)
       for (Path subPath : path.getPath()) {
         logicalPath(subPath);
@@ -213,7 +213,7 @@ public class LogicOptimizer {
   public static void injectReturn(Query query, String iri,String nodeRef){
     if (query.getReturn() != null) {
       for (Return ret : query.getReturn()) {
-        if (ret.getIri().equals(iri)&&ret.getNodeRef().equals(nodeRef)) return;
+        if (Objects.equals(ret.getIri(), iri) && Objects.equals(ret.getNodeRef(), nodeRef)) return;
       }
     }
     String as=(nodeRef!=null ?nodeRef+"_" : "")+ iri.substring(iri.lastIndexOf('#')+1).replaceAll("[^a-zA-Z0-9_]", "_");
@@ -227,18 +227,10 @@ public class LogicOptimizer {
   }
 
   public static boolean isLinkedWhere(Where where) {
-
-    if (where.getCompare() != null) {
-      if (where.getCompare().getLeft() != null) {
-        if (where.getCompare().getLeft().getNodeRef() != null) {
+      if (where.getCompare() != null) {
+        if (where.getCompare().getNodeRef() != null) {
           return true;
         }
-      }
-      if (where.getCompare().getRight() != null) {
-        if (where.getCompare().getRight().getNodeRef() != null) {
-          return true;
-        }
-      }
     }
     if (where.getAnd() != null) {
       for (Where andWhere : where.getAnd()) {
@@ -353,18 +345,11 @@ public class LogicOptimizer {
     rewritten.setValue(negateInterval(where.getValue()));
     rewritten.setUnits(where.getUnits());
     rewritten.setNot(where.isNot());
-
-    ValueSource left = new ValueSource();
-    left.setIri("http://endhealth.info/im#dateOfBirth");
-
+    rewritten.setIri("http://endhealth.info/im#dateOfBirth");
     ValueSource right = new ValueSource();
     right.setParameter("$searchDate");
 
-    Compare compare = new Compare();
-    compare.setLeft(left);
-    compare.setRight(right);
-
-    rewritten.setCompare(compare);
+    rewritten.setCompare(right);
 
     return rewritten;
   }
@@ -738,8 +723,8 @@ public class LogicOptimizer {
   }
 
   private static void collectRelativeToRefs(Where where, Map<String, Set<String>> referenced) {
-    if (where.getCompare() != null && where.getCompare().getRight() != null) {
-      ValueSource right = where.getCompare().getRight();
+    if (where.getCompare() != null) {
+      ValueSource right = where.getCompare();
       if (right.getNodeRef() != null && right.getIri() != null) {
         referenced.computeIfAbsent(right.getNodeRef(), k -> new LinkedHashSet<>()).add(right.getIri());
       }
@@ -751,10 +736,8 @@ public class LogicOptimizer {
 
   /** Properties a 'from' match filters on must be carried out of the group it reads from. */
   private static void collectFromWhereRefs(String from, Where where, Map<String, Set<String>> referenced) {
-    String nodeRef = where.getCompare() != null && where.getCompare().getLeft() != null
-      ? where.getCompare().getLeft().getNodeRef() : where.getNodeRef();
-    String iri = where.getCompare() != null && where.getCompare().getLeft() != null && where.getCompare().getLeft().getIri() != null
-      ? where.getCompare().getLeft().getIri() : where.getIri();
+    String nodeRef = where.getNodeRef();
+    String iri = where.getIri();
     if (nodeRef == null && iri != null) {
       referenced.computeIfAbsent(from, k -> new LinkedHashSet<>()).add(iri);
     }

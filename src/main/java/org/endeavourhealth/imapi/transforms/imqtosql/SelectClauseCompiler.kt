@@ -189,14 +189,18 @@ internal class SelectClauseCompiler(private val ctx: ConversionContext) {
       }
 
       val field = if (arg.valuePath.nodeRef != null) {
+        getDegradedNodeRefSelect(arg.valuePath.nodeRef, arg.valuePath.iri)?.let {
+          concatenateFields.add(it)
+          continue
+        }
         val currentTable = nodeToTableMap[arg.valuePath.nodeRef]
           ?: throw SQLConversionException(
             "Missing nodeRef from valuePath for concatenate function argument: ${arg.valuePath.nodeRef}"
           )
         val resolved = getPropertyNameByTableAndPropertyIri(currentTable, arg.valuePath.iri).field
-        qualifyField(currentTable.alias, resolved)
+        qualifyField(currentTable.alias ?: currentTable.table, resolved)
       } else {
-        qualifyField(null, getPropertyNameByTableAndPropertyIri(table, arg.valuePath.iri).field)
+        qualifyField(table.alias ?: table.table, getPropertyNameByTableAndPropertyIri(table, arg.valuePath.iri).field)
       }
 
       if (field.isEmpty()) {
@@ -222,20 +226,32 @@ internal class SelectClauseCompiler(private val ctx: ConversionContext) {
     return degraded.replace("{table}", parentTableRef)
   }
 
+  /**
+   * Whether a return reads from the current step's own table: no nodeRef, a nodeRef to the query's own subject (unless a
+   * match rebinds that name), or a nodeRef to the step itself (its own `as`). Such returns must honour functional joins.
+   * A path node never is, even one that degraded to the step's table: its returns resolve through the path field's returnAs.
+   */
+  fun isOwnTableReturn(ret: Return, nodeToTableMap: Map<String, Table>, currentWithTable: Table): Boolean {
+    val nodeRef = ret.nodeRef ?: return true
+    if (nodeRef in ctx.nodePathContextMap) return false
+    if (nodeRef in ctx.mainEntityNames && !nodeToTableMap.containsKey(nodeRef)) return true
+    return nodeToTableMap[nodeRef] === currentWithTable
+  }
+
   private fun addSelectFromProperty(
     returnProperty: Return,
     selects: MutableList<MySQLSelect>,
     nodeToTableMap: HashMap<String, Table>,
     currentWithTable: Table
   ) {
-    if (returnProperty.nodeRef != null) {
+    if (!isOwnTableReturn(returnProperty, nodeToTableMap, currentWithTable)) {
       getDegradedNodeRefSelect(returnProperty.nodeRef, returnProperty.iri)?.let {
         selects.add(MySQLSelect(it, returnProperty.`as`))
         return
       }
 
       val currentTable = nodeToTableMap[returnProperty.nodeRef]
-        ?: throw SQLConversionException("No table exists for ${returnProperty.iri}")
+        ?: throw SQLConversionException("No table exists for node ${returnProperty.nodeRef} (return ${returnProperty.iri})")
 
       val property = getPropertyNameByTableAndPropertyIri(currentTable, returnProperty.iri)
       val field = qualifyField(currentTable.alias ?: currentTable.table, property.field)

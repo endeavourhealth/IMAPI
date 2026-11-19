@@ -17,6 +17,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.context.annotation.RequestScope;
 
+import java.io.IOException;
 import java.util.Set;
 import java.util.UnknownFormatConversionException;
 
@@ -167,6 +168,16 @@ public class EclController {
     try (MetricsTimer t = MetricsHelper.recordTime("API.Entity.rangesForProperty.GET")) {
       log.debug("getRangesForProperty");
       return conceptService.getRangesForProperty(iri);
+    }
+  }
+  @GetMapping(value = "/protected/eclfrommembers")
+  @Operation(summary = "Compare two sets", description = "Compares two sets identified by the provided IRIs and returns their differences.")
+  public String getEclFromMembers(
+    HttpServletRequest request,
+    @RequestParam(name = "iri") String iri) throws IOException, QueryException {
+    try (MetricsTimer t = MetricsHelper.recordTime("API.Entity.EclFromMembers.GET")) {
+      log.debug("getEclFromMebers");
+      return eclService.getEclFromMembers(iri);
     }
   }
 }

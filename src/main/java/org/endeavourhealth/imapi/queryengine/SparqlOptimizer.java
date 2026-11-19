@@ -1,8 +1,6 @@
 package org.endeavourhealth.imapi.queryengine;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import org.endeavourhealth.imapi.utility.SharedObjectMapper;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.endeavourhealth.imapi.dataaccess.EntityRepository;
 import org.endeavourhealth.imapi.dataaccess.SetRepository;
 import org.endeavourhealth.imapi.filer.TTFilerException;
@@ -12,6 +10,7 @@ import org.endeavourhealth.imapi.model.imq.*;
 import org.endeavourhealth.imapi.model.tripletree.TTDocument;
 import org.endeavourhealth.imapi.model.tripletree.TTEntity;
 import org.endeavourhealth.imapi.model.tripletree.TTLiteral;
+import org.endeavourhealth.imapi.utility.SharedObjectMapper;
 import org.endeavourhealth.imapi.vocabulary.GRAPH;
 import org.endeavourhealth.imapi.vocabulary.IM;
 import org.endeavourhealth.imapi.vocabulary.NAMESPACE;
@@ -52,8 +51,8 @@ public class SparqlOptimizer {
   private void optimizeProperties(Query query) throws QueryException, TTFilerException, JsonProcessingException {
     if (query.getIs() != null) {
       Node node = query.getIs();
-      if (node.getMatch() != null)
-        optimizeProperties(node.getMatch());
+      if (node.getQuery() != null)
+        optimizeProperties(node.getQuery());
     }
     if (query.getWhere() != null) {
       optimizeWhereProperties(query.getWhere());
@@ -73,8 +72,8 @@ public class SparqlOptimizer {
   private void optimizeValueSets(Query query) throws QueryException, JsonProcessingException, TTFilerException {
     if (query.getIs() != null) {
       Node node = query.getIs();
-      if (node.getMatch() != null)
-        optimizeValueSets(node.getMatch());
+      if (node.getQuery() != null)
+        optimizeValueSets(node.getQuery());
     }
     if (query.getWhere() != null) {
       optimizeWhereSets(query.getWhere());
@@ -106,7 +105,7 @@ public class SparqlOptimizer {
       if (where.getIs().size() > 1) {
         String setIri = createConceptSet(where.getIs());
         List<Node> newIs = new ArrayList<>();
-        newIs.add(Node.iri(setIri).setMemberOf(true));
+        newIs.add(Node.iri(setIri).setEntails(Entail.memberOf));
         where.setIs(newIs);
         setIris.add(setIri);
       }
@@ -136,17 +135,11 @@ public class SparqlOptimizer {
       if (commonWheres.get(setIri).size() > 1) {
         Where firstWhere = commonWheres.get(setIri).getFirst();
         firstWhere.addToPropertyList(new Node().setIri(firstWhere.getIri())
-          .setDescendantsOrSelfOf(firstWhere.isDescendantsOrSelfOf())
-          .setDescendantsOf(firstWhere.isDescendantsOf())
-          .setAncestorsOf(firstWhere.isAncestorsOf())
-          .setMemberOf(firstWhere.isMemberOf()));
+            .setEntails(firstWhere.getEntails()));
         for (int i = 1; i < commonWheres.get(setIri).size(); i++) {
           Where nextWhere = commonWheres.get(setIri).get(i);
           firstWhere.addToPropertyList(new Node().setIri(nextWhere.getIri())
-            .setDescendantsOrSelfOf(nextWhere.isDescendantsOrSelfOf())
-            .setDescendantsOf(nextWhere.isDescendantsOf())
-            .setAncestorsOf(nextWhere.isAncestorsOf())
-            .setMemberOf(nextWhere.isMemberOf()));
+              .setEntails(nextWhere.getEntails()));
           commonWheres.get(setIri).remove(i);
           where.getOr().remove(i);
           i--;

@@ -11,6 +11,8 @@ plugins {
   id("maven-publish")
   kotlin("jvm")
   kotlin("plugin.spring") version "2.2.20"
+  kotlin("plugin.lombok") version "2.2.20"
+  kotlin("kapt") version "2.2.20"
 }
 
 group = "org.endeavourhealth.imapi"
@@ -30,9 +32,6 @@ repositories {
   mavenLocal()
 }
 
-val ENV = System.getenv("ENV") ?: "dev"
-println("Build environment = [$ENV]")
-
 val CI = System.getenv("CI") ?: "false"
 if (CI == "false") {
   tasks.named<JavaCompile>("compileJava") {
@@ -44,7 +43,8 @@ if (CI == "false") {
 
 // `gradle build` (local or CI) compiles and runs the unit tests. Sonar is never part of it; CI runs `gradle sonar` instead,
 // which does the build and unit tests, then the jacoco coverage report, then uploads to Sonar.
-tasks.sonar { dependsOn(tasks.build, tasks.jacocoTestReport) }
+val ENV = System.getenv("ENV")?.uppercase() ?: "DEV"
+println("Build environment = [$ENV]")
 
 publishing {
   publications {
@@ -173,6 +173,8 @@ dependencies {
 
   annotationProcessor(libs.jackson.annotations)
   annotationProcessor(libs.lombok)
+  implementation(kotlin("stdlib-jdk8"))
+  testImplementation(kotlin("test"))
 }
 
 tasks.test {
@@ -184,6 +186,7 @@ tasks.test {
 }
 
 tasks.register("imqTests", Test::class.java) {
+  outputs.upToDateWhen { false }
   testClassesDirs = sourceSets["test"].output.classesDirs
   classpath = sourceSets["test"].runtimeClasspath
   useJUnitPlatform {
@@ -192,6 +195,7 @@ tasks.register("imqTests", Test::class.java) {
 }
 
 tasks.register("imqQOFQueriesTest", Test::class.java) {
+  outputs.upToDateWhen { false }
   testClassesDirs = sourceSets["test"].output.classesDirs
   classpath = sourceSets["test"].runtimeClasspath
   useJUnitPlatform {
@@ -200,6 +204,7 @@ tasks.register("imqQOFQueriesTest", Test::class.java) {
 }
 
 tasks.register("imqSMHQueriesTest", Test::class.java) {
+  outputs.upToDateWhen { false }
   testClassesDirs = sourceSets["test"].output.classesDirs
   classpath = sourceSets["test"].runtimeClasspath
   useJUnitPlatform {
@@ -208,6 +213,7 @@ tasks.register("imqSMHQueriesTest", Test::class.java) {
 }
 
 tasks.register("imqREGQueriesTest", Test::class.java) {
+  outputs.upToDateWhen { false }
   testClassesDirs = sourceSets["test"].output.classesDirs
   classpath = sourceSets["test"].runtimeClasspath
   useJUnitPlatform {
@@ -225,6 +231,9 @@ tasks.jacocoTestReport {
 
 kotlin {
   jvmToolchain(21)
+}
+kapt {
+  keepJavacAnnotationProcessors = true
 }
 configurations.all {
   // log4j-core clashes with the log4j-to-slf4j bridge (log4j API -> logback). The Elasticsearch client used to pull it in; kept so it cannot return transitively.

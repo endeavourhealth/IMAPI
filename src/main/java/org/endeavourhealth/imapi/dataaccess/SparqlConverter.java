@@ -109,7 +109,7 @@ public class SparqlConverter {
 
 
   private String getSelectSparql(Query query, boolean countOnly) throws QueryException {
-    mainEntity = query.getNode() != null ? query.getNode() : "entity";
+    mainEntity = query.getAs() != null ? query.getAs() : "entity";
     StringBuilder selectQl = new StringBuilder();
     if (countOnly) {
       selectQl.append("SELECT");
@@ -137,8 +137,8 @@ public class SparqlConverter {
   private void processQuery(Query query, StringBuilder sparql, boolean includeReturns) throws QueryException {
     StringBuilder whereQl = new StringBuilder();
     mainEntity = "entity";
-    if (query.getNode() != null)
-      mainEntity = query.getNode();
+    if (query.getAs() != null)
+      mainEntity = query.getAs();
     if (query.getParameter() != null)
       mainEntity = query.getParameter().replace("$", "");
     whereQl.append("WHERE {");
@@ -197,8 +197,8 @@ public class SparqlConverter {
     if (query.getFrom() != null){
           subject = query.getFrom();
     }
-    else if (query.getNode() != null)
-      subject = query.getNode();
+    else if (query.getAs() != null)
+      subject = query.getAs();
     else if (query.getParameter() != null) {
       subject = query.getParameter().replace("$", "");
       whereQl.append(" VALUES ").append("?").append(subject).append("{").append(getIriFromAlias(null, query.getParameter(), null, null)).append("}\n");
@@ -228,7 +228,7 @@ public class SparqlConverter {
     if (query.getAnd() != null) {
       for (int i = 0; i < query.getAnd().size(); i++) {
         Query subQuery = query.getAnd().get(i);
-        if (subQuery.getNode() != null) {
+        if (subQuery.getAs() != null) {
           subselects.append("{").append(getSelectSparql(subQuery, false)).append("}\n");
         } else
           processMatch(selectQl, whereQl, subject, subQuery);
@@ -237,22 +237,14 @@ public class SparqlConverter {
     if (query.getAnd() != null) {
       for (int i = 0; i < query.getAnd().size(); i++) {
         Query subQuery = query.getAnd().get(i);
-        if (subQuery.getNode() != null) {
+        if (subQuery.getAs() != null) {
           subselects.append("{").append(getSelectSparql(subQuery, false)).append("}\n");
         } else
           processMatch(selectQl, whereQl, subject, subQuery);
       }
     }
     if (query.getOr() != null) {
-      for (int i = 0; i < query.getOr().size(); i++) {
-        if (i == 0)
-          whereQl.append("{ \n");
-        else
-          whereQl.append("UNION {\n");
-        Query subQuery = query.getOr().get(i);
-        processMatch(selectQl, whereQl, subject, subQuery);
-        whereQl.append("}\n");
-      }
+      processOr(selectQl, whereQl, subject, query.getOr());
     }
 
     o++;
@@ -271,12 +263,50 @@ public class SparqlConverter {
     }
   }
 
+  /**
+   * Plain "is" branches are merged into one VALUES list per entailment type, rather than one UNION branch each,
+   * as very large sets otherwise produce a union too deep for the SPARQL engine to parse/evaluate (StackOverflowError).
+   */
+  private void processOr(StringBuilder selectQl, StringBuilder whereQl, String subject, List<Query> ors) throws QueryException {
+    Map<Entail, List<Node>> simpleIs = new LinkedHashMap<>();
+    List<Query> complex = new ArrayList<>();
+    for (Query or : ors) {
+      if (isSimpleIsBranch(or))
+        sortInstances(or.getIs(), simpleIs, new HashMap<>());
+      else
+        complex.add(or);
+    }
+    boolean first = true;
+    for (Map.Entry<Entail, List<Node>> entry : simpleIs.entrySet()) {
+      whereQl.append(first ? "{ \n" : "UNION {\n");
+      first = false;
+      processMatchIsNodes(whereQl, subject, Map.of(entry.getKey(), entry.getValue()), false);
+      whereQl.append("}\n");
+    }
+    for (Query or : complex) {
+      whereQl.append(first ? "{ \n" : "UNION {\n");
+      first = false;
+      processMatch(selectQl, whereQl, subject, or);
+      whereQl.append("}\n");
+    }
+  }
+
+  private boolean isSimpleIsBranch(Query or) {
+    Node is = or.getIs();
+    if (is == null || is.getIri() == null) return false;
+    if (is.getQuery() != null || is.getNodeRef() != null || is.getParameter() != null || is.getNode() != null || is.isExclude())
+      return false;
+    return or.getAnd() == null && or.getOr() == null && or.getWhere() == null && or.getPath() == null
+      && or.getTypeOf() == null && or.getAs() == null && or.getFrom() == null && or.getParameter() == null
+      && or.getEntailment() == null && or.getGraph() == null && !or.notExists();
+  }
+
   private String processPath(StringBuilder whereQl, String subject, Path pathMatch) throws QueryException {
     if (pathMatch.isOptional()) {
       whereQl.append(tabs).append("OPTIONAL {\n");
     }
     String inverse = pathMatch.isInverse() ? "^" : "";
-    String object = pathMatch.getNode();
+    String object = pathMatch.getAs();
     String predicate = getIriFromAlias(pathMatch.getIri(), pathMatch.getParameter(), pathMatch.getPathVariable(), null);
     if (inverse.equals("^") && predicate.startsWith("?"))
       throw new QueryException("Inverse processPath processMatch cannot have a variable as predicate");
@@ -297,13 +327,13 @@ public class SparqlConverter {
     for (Node node : nodes) {
       if (ref != null)
         throw new QueryException("in list cannot be longer than one if there are references");
-      if (node.getMatch() != null) {
-        if (node.getMatch().getNode() != null) {
-          ref = node.getMatch().getNode();
+      if (node.getQuery() != null) {
+        if (node.getQuery().getAs() != null) {
+          ref = node.getQuery().getAs();
         } else {
           o++;
           ref = "sub" + subject + o;
-          node.getMatch().setNode(ref);
+          node.getQuery().setNode(ref);
         }
       }
       if (node.getNodeRef() != null)
@@ -360,8 +390,8 @@ public class SparqlConverter {
         processMatchIsMemberOf(whereQl, subject, object, inList);
       } else
         processMatchEqual(whereQl, subject, inList);
-      if (in.getFirst().getMatch() != null) {
-        whereQl.append("{").append(getSelectSparql(in.getFirst().getMatch(), false)).append("}\n");
+      if (in.getFirst().getQuery() != null) {
+        whereQl.append("{").append(getSelectSparql(in.getFirst().getQuery(), false)).append("}\n");
       }
       if (isUnion)
         whereQl.append("}\n");
@@ -370,15 +400,9 @@ public class SparqlConverter {
   }
 
   private void sortInstances(Node instance, Map<Entail, List<Node>> inTypes, Map<Entail, List<Node>> outTypes) {
-    Entail entail = Entail.equal;
-    if (instance.isMemberOf())
-      entail = Entail.memberOf;
-    else if (instance.isDescendantsOrSelfOf())
-      entail = Entail.descendantsOrSelfOf;
-    else if (instance.isDescendantsOf())
-      entail = Entail.descendantsOf;
-    else if (instance.isAncestorsOf())
-      entail = Entail.ancestorsOf;
+    Entail entail = instance.getEntails();
+    if (entail == null)
+      entail= Entail.equal;
     if (instance.isExclude()) {
       outTypes.computeIfAbsent(entail, m -> new ArrayList<>()).add(instance);
     } else
@@ -429,12 +453,13 @@ public class SparqlConverter {
 
   private void processTypeOf(StringBuilder whereQl, Node type, String subject) throws QueryException {
     String typeIris = iriFromAlias(type);
-    if (type.isDescendantsOrSelfOf()) {
+    Entail entail = type.getEntails();
+    if (entail==Entail.descendantsOrSelfOf) {
       o++;
       String supertype = "supertype" + o;
       whereQl.append("?").append(subject).append(" im:isA ?").append(supertype).append(".\n");
       whereQl.append(" VALUES ?").append(supertype).append(" {").append(typeIris).append(" }\n");
-    } else if (type.isDescendantsOf()) {
+    } else if (entail==Entail.descendantsOf) {
       o++;
       String supertype = "supertype" + o;
       whereQl.append("?").append(subject).append(" im:isA ?").append(supertype).append(".\n");
@@ -500,8 +525,8 @@ public class SparqlConverter {
         processWhereIs(whereQl, where);
       } else if (where.getValue() != null) {
         whereValue(whereQl, where);
-      } else if (where.getNode() != null) {
-        whereQl.append(" ?").append(where.getNode()).append(".\n");
+      } else if (where.getAs() != null) {
+        whereQl.append(" ?").append(where.getAs()).append(".\n");
       } else {
         o++;
         whereQl.append(" ?").append(subject).append("o").append(o);
@@ -532,10 +557,13 @@ public class SparqlConverter {
     } else propertyIris = iriFromAlias(where);
     String inverse = where.isInverse() ? "^" : "";
     o++;
-    if (where.isInverse() && (where.getParameter() != null || where.getPropertyVariable() != null || where.isDescendantsOrSelfOf() || where.isAncestorsOf())) {
+    Entail entail= where.getEntails();
+    if (where.isInverse() && (where.getParameter() != null || where.getPropertyVariable() != null || entail== Entail.descendantsOrSelfOf
+      || entail==Entail.ancestorsOf || entail==Entail.descendantsOf)) {
       throw new QueryException("Inverse propertyPath and parameters or variables or entailments are not supported\"");
     }
-    if (where.isDescendantsOrSelfOf()) {
+
+    if (entail == Entail.descendantsOrSelfOf) {
       if (propertyIris == null)
         throw new QueryException("Descendants or self of requires a property IRI");
       String superProperty = "superProperty" + o;
@@ -544,7 +572,7 @@ public class SparqlConverter {
       whereQl.append("VALUES ?").append(superProperty).append(" {").append(propertyIris).append("}").append("\n.");
       whereQl.append("?").append(propertyVariable).append(" im:isA ?").append(superProperty).append(".\n");
       whereQl.append("?").append(subject).append(" ?").append(propertyVariable);
-    } else if (where.isAncestorsOf()) {
+    } else if (entail == Entail.descendantsOf) {
       if (propertyIris == null)
         throw new QueryException("Ancestors or self of requires a property IRI");
       String subProperty = "subProperty" + o;
@@ -591,23 +619,21 @@ public class SparqlConverter {
     boolean superTypes = false;
     boolean membersOf = false;
     for (Node item : in) {
-      if (item.isDescendantsOrSelfOf()) {
+      Entail entail = item.getEntails();
+      if (entail == Entail.descendantsOrSelfOf || entail == Entail.descendantsOf) {
         subTypes = true;
         break;
       }
-    }
-    for (Node item : in) {
-      if (item.isMemberOf()) {
-        membersOf = true;
+      else if (entail == Entail.memberOf) {
+        membersOf= true;
         break;
       }
-    }
-    for (Node item : in) {
-      if (item.isAncestorsOf()) {
+      else if (entail == Entail.ancestorsOf) {
         superTypes = true;
         break;
       }
     }
+
     String nodeRef = in.getFirst().getNodeRef() != null ? in.getFirst().getNodeRef() : null;
     String parameter = in.getFirst().getParameter() != null ? in.getFirst().getParameter() : null;
     List<String> inList = new ArrayList<>();

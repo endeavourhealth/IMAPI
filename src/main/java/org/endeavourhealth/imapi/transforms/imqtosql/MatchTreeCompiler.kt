@@ -85,9 +85,9 @@ internal class MatchTreeCompiler(
   }
 
   private fun addGroupBody(currentMatch: Query, mySqlQuery: MySQLQuery) {
+    if (currentMatch.`is` != null) mySqlQuery.withs.add(getIsWith(currentMatch, mySqlQuery))
     if (currentMatch.and != null) addAnds(currentMatch, mySqlQuery)
     if (currentMatch.or != null) addOrs(currentMatch, mySqlQuery)
-    if (currentMatch.`is` != null) mySqlQuery.withs.add(getIsWith(currentMatch, mySqlQuery))
   }
 
   private fun addNotExistsGroup(group: Query, mySqlQuery: MySQLQuery) {
@@ -247,7 +247,7 @@ internal class MatchTreeCompiler(
     }
 
     if (match.path != null) pathJoinBuilder.addPathTableAndJoins(match.path, mySQLQuery.nodeToTableMap, with, addJoins = true)
-    if (match.node != null) mySQLQuery.nodeToTableMap[match.node] = with.table
+    if (match.`as` != null) mySQLQuery.nodeToTableMap[match.`as`] = with.table
     with.alias = aliases.useAs(requireAs(match))
 
     if (match.where != null) {
@@ -354,7 +354,7 @@ internal class MatchTreeCompiler(
   }
 
   private fun addSelects(match: Query, mySQLQuery: MySQLQuery, with: MySQLWith, isReferencedElsewhere: Boolean) {
-    if (match.`return` != null) addReturnFunctionalJoins(match, with)
+    if (match.`return` != null) addReturnFunctionalJoins(match, with, mySQLQuery.nodeToTableMap)
     val isAggregate = match.`return`?.any { it.function?.iri == COUNT_FUNCTION_IRI } == true
     // an aggregate collapses rows to one per entity, so only grouped columns can be selected, not table.*
     if (isReferencedElsewhere && !isAggregate) {
@@ -378,7 +378,7 @@ internal class MatchTreeCompiler(
           with.alias,
           mySQLQuery.nodeToTableMap,
         )
-      with.selects.addAll(selects)
+      with.selects.addAll(selects.filterNot { it.alias != null && it in with.selects })
     }
     for (propIri in carryPropertiesStack.lastOrNull().orEmpty()) {
       val alias = propIri.substringAfterLast('#')
@@ -404,9 +404,9 @@ internal class MatchTreeCompiler(
   }
 
   /** Joins the tables holding functional properties returned directly from this match's own table. */
-  private fun addReturnFunctionalJoins(match: Query, with: MySQLWith) {
+  private fun addReturnFunctionalJoins(match: Query, with: MySQLWith, nodeToTableMap: Map<String, Table>) {
     for (ret in match.`return`) {
-      if (ret.iri == null || ret.nodeRef != null) continue
+      if (ret.iri == null || !selectCompiler.isOwnTableReturn(ret, nodeToTableMap, with.table)) continue
       val field = getPropertyNameByTableAndPropertyIri(with.table, ret.iri)
       if (field.join == null) continue
       val fromRef = with.fromAlias ?: with.table.alias ?: with.table.table

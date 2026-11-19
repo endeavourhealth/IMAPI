@@ -19,13 +19,11 @@ import org.endeavourhealth.imapi.model.requests.MatchDisplayRequest;
 import org.endeavourhealth.imapi.model.requests.QueryDisplayRequest;
 import org.endeavourhealth.imapi.model.requests.QueryRequest;
 import org.endeavourhealth.imapi.model.responses.SearchResponse;
-import org.endeavourhealth.imapi.model.security.Permission;
 import org.endeavourhealth.imapi.model.security.Action;
 import org.endeavourhealth.imapi.model.security.Resource;
 import org.endeavourhealth.imapi.model.sql.SubQueryDependency;
 import org.endeavourhealth.imapi.model.tripletree.TTEntity;
 import org.endeavourhealth.imapi.model.tripletree.TTIriRef;
-import org.endeavourhealth.imapi.model.workflow.roleRequest.UserRole;
 import org.endeavourhealth.imapi.utility.MetricsHelper;
 import org.endeavourhealth.imapi.utility.MetricsTimer;
 import org.springframework.web.bind.annotation.*;
@@ -328,13 +326,13 @@ public class QueryController {
   }
 
   @PostMapping("/queryRequestForSQL")
-  @Operation(summary = "Get all subQueries ordered of a query using the query iri")
+  @Operation(summary = "Get query request for SQL conversion using the query iri")
   public QueryRequest getQueryRequestForSql(
     HttpServletRequest request,
     @RequestBody QueryRequest queryRequest
   ) throws SQLConversionException, JsonProcessingException {
     try (MetricsTimer t = MetricsHelper.recordTime("API.Query.ArgumentType.GET")) {
-      log.debug("getSubQueries");
+      log.debug("getQueryRequestForSql");
       return queryService.getQueryRequestForSqlConversion(queryRequest);
     }
   }
@@ -369,6 +367,7 @@ public class QueryController {
       return queryService.validateMatch(query);
     }
   }
+
   @GetMapping("/semanticMaps")
   @Operation(summary = "Get the list of semanticMaps for a source type")
   public Set<TTEntity> getSemanticMaps(
