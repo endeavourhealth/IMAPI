@@ -8,12 +8,12 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.endeavourhealth.imapi.logic.service.DataModelService;
 import org.endeavourhealth.imapi.model.PropertyDisplay;
-import org.endeavourhealth.imapi.model.iml.ArrayButtons;
+import org.endeavourhealth.imapi.model.iml.SemanticMap;
+import org.endeavourhealth.imapi.utility.MetricsHelper;
+import org.endeavourhealth.imapi.utility.MetricsTimer;
 import org.endeavourhealth.imapi.model.iml.NodeShape;
 import org.endeavourhealth.imapi.model.iml.UIProperty;
 import org.endeavourhealth.imapi.model.tripletree.TTIriRef;
-import org.endeavourhealth.imapi.utility.MetricsHelper;
-import org.endeavourhealth.imapi.utility.MetricsTimer;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.context.annotation.RequestScope;
 
@@ -34,16 +34,25 @@ public class DataModelController {
     summary = "Retrieve a node shape with data model properties",
     description = "Fetches the data model properties for the given IRI."
   )
+
   @GetMapping("/dataModelProperties")
   public NodeShape getDataModelProperties(
     HttpServletRequest request,
     @Parameter(description = "IRI of the data model") @RequestParam(name = "iri") String iri,
-    @RequestParam(name = "pathsOnly", required = false, defaultValue = "false") boolean pathsOnly,
-    @RequestParam(name="excludeGeneric",required= false, defaultValue= "false") boolean excludeGeneric
+    @RequestParam(name = "pathsOnly", required = false, defaultValue = "false") boolean pathsOnly
   ) {
     try (MetricsTimer t = MetricsHelper.recordTime("API.Entity.DataModelProperties.GET")) {
       log.debug("getDataModelProperties " + (pathsOnly ? "paths only" : "") + "for " + iri);
-      return dataModelService.getDataModelDisplayProperties(iri, pathsOnly,excludeGeneric);
+      return dataModelService.getDataModelDisplayProperties(iri, pathsOnly);
+    }
+  }
+  @GetMapping("/flatDataModelProperties")
+  public NodeShape getFlatDataModelProperties(
+    HttpServletRequest request,
+    @Parameter(description = "IRI of the data model") @RequestParam(name = "iri") String iri) {
+    try (MetricsTimer t = MetricsHelper.recordTime("API.Entity.DataModelProperties.GET")) {
+      log.debug("getFlatDataModelProperties for " + iri);
+      return dataModelService.getFlatDataModelDisplayProperties(iri);
     }
   }
 
@@ -62,6 +71,21 @@ public class DataModelController {
     }
   }
 
+
+  @Operation(
+    summary = "Fetches properties of a type and its linked types",
+    description = "Returns a list of properties displayed and linked types for the given IRI."
+  )
+  @GetMapping(value = "/relatedTypes")
+  public NodeShape getRelatedTypes(
+    HttpServletRequest request,
+    @Parameter(description = "IRI of the data model") @RequestParam(name = "iri") String iri
+  ) {
+    try (MetricsTimer t = MetricsHelper.recordTime("API.Entity.RelatedTypes.GET")) {
+      log.debug("getRelatedTypes for " + iri);
+      return dataModelService.getRelatedTypes(iri);
+    }
+  }
 
   @Operation(
     summary = "Retrieve UI property for query builder",
@@ -136,6 +160,19 @@ public class DataModelController {
     try (MetricsTimer t = MetricsHelper.recordTime("API.Query.Display.GET")) {
       log.debug("getInversePath from " + source + " to " + target);
       return dataModelService.getInversePath(source, target);
+    }
+  }
+  @GetMapping(value = "/semanticMap", produces = "application/json")
+  @Operation(
+    summary = "gets the semanticMap and its entries",
+    description = "for the map iri"
+  )
+  public SemanticMap getSemanticMap(
+    HttpServletRequest request,
+    @RequestParam(name = "iri") String iri) {
+    try (MetricsTimer t = MetricsHelper.recordTime("API.Query.Display.GET")) {
+      log.debug("getSemanticMap for " + iri);
+      return dataModelService.getSemanticMap(iri);
     }
   }
 }

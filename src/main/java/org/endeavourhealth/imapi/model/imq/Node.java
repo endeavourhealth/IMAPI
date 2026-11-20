@@ -4,57 +4,93 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import com.fasterxml.jackson.annotation.JsonSetter;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Consumer;
 
-
-@JsonPropertyOrder({"descendantsOrSelfOf","parameter", "iri", "type", "set", "qualifier","match"})
+@JsonPropertyOrder({"descendantsOrSelfOf", "parameter", "iri", "type", "set", "qualifier", "query"})
 @JsonInclude(JsonInclude.Include.NON_DEFAULT)
-public class Node extends Element{
+public class Node extends Element {
+
   private boolean exclude;
   private String code;
   private String type;
   private boolean inverse;
-  private Match match;
+  private Query query;
   private String node;
   private String qualifier;
+  private boolean cohort;
+  private List<IriLD> in;
+
+  public Node() {
+  }
+
+  public List<IriLD> getIn() {
+    return in;
+  }
+
+  public Node setIn(List<IriLD> in) {
+    this.in = in;
+    return this;
+  }
+  public Node addIn (IriLD in){
+      if (this.in == null) {
+        this.in = new ArrayList<>();
+      }
+      this.in.add(in);
+      return this;
+  }
+  public Node in (Consumer < IriLD > builder) {
+      IriLD in = new IriLD();
+      addIn(in);
+      builder.accept(in);
+      return this;
+  }
+
+
+  public Node setEntails(Entail entails){
+    super.setEntails(entails);
+    return this;
+  }
+
+  public static Node iri(String iri) {
+    Node node = new Node();
+    node.setIri(iri);
+    return node;
+  }
 
   public String getQualifier() {
     return qualifier;
   }
+
   public Node setQualifier(String qualifier) {
     this.qualifier = qualifier;
     return this;
   }
 
-
-
-
-
-  public Match getMatch() {
-    return match;
+  public Query getQuery() {
+    return query;
   }
 
-  public Node setMatch(Match match) {
-    this.match = match;
+  public Node setQuery(Query query) {
+    this.query = query;
     return this;
   }
 
-  public Node match(Consumer<Match> match) {
-    Match m = new Match();
+  public Node query(Consumer<Query> match) {
+    Query m = new Query();
     match.accept(m);
-    this.match = m;
+    this.query = m;
     return this;
   }
 
-  public Node setIsResultSet(boolean resultSet) {
-    super.setIsResultSet(resultSet);
+
+
+  public Node setCohort(boolean isCohort) {
+    super.setCohort(isCohort);
     return this;
   }
 
-  public Node setIsCohort(boolean isCohort) {
-    super.setIsCohort(isCohort);
-    return this;
-  }
   public boolean isInverse() {
     return inverse;
   }
@@ -63,8 +99,6 @@ public class Node extends Element{
     this.inverse = inverse;
     return this;
   }
-
-
 
   public String getType() {
     return type;
@@ -83,7 +117,6 @@ public class Node extends Element{
     this.code = code;
     return this;
   }
-
 
   public boolean isExclude() {
     return exclude;
@@ -104,37 +137,6 @@ public class Node extends Element{
     return this;
   }
 
-  public static Node iri(String iri) {
-    Node node= new Node();
-    node.setIri(iri);
-    return node;
-  }
-
-  public Node() {
-  }
-
-
-
-
-  public Node setAncestorsOf(boolean ancestorsOf) {
-    super.setAncestorsOf(ancestorsOf);
-    return this;
-  }
-
-  public Node setDescendantsOrSelfOf(boolean descendantsOrSelfOf) {
-    super.setDescendantsOrSelfOf(descendantsOrSelfOf);
-    return this;
-  }
-
-  public Node setDescendantsOf(boolean descendantsOf) {
-    super.setDescendantsOf(descendantsOf);
-    return this;
-  }
-
-  public Node setMemberOf(boolean memberOf) {
-    super.setMemberOf(memberOf);
-    return this;
-  }
 
 
   @JsonSetter
@@ -148,13 +150,12 @@ public class Node extends Element{
     return this;
   }
 
-  public Node setNode(String node) {
-    this.node=node;
-    return this;
-  }
   public String getNode() {
     return node;
   }
 
+  public Node setNode(String node) {
+    this.node = node;
+    return this;
+  }
 }
-

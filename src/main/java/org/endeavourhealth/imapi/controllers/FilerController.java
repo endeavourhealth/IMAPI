@@ -17,14 +17,12 @@ import org.endeavourhealth.imapi.model.imq.Query;
 import org.endeavourhealth.imapi.model.requests.EditRequest;
 import org.endeavourhealth.imapi.model.requests.FileDocumentRequest;
 import org.endeavourhealth.imapi.model.requests.QueryRequest;
-import org.endeavourhealth.imapi.model.security.NamespacePermission;
-import org.endeavourhealth.imapi.model.security.Permission;
+import org.endeavourhealth.imapi.model.security.Action;
 import org.endeavourhealth.imapi.model.security.Resource;
 import org.endeavourhealth.imapi.model.security.User;
 import org.endeavourhealth.imapi.model.tripletree.TTArray;
 import org.endeavourhealth.imapi.model.tripletree.TTEntity;
 import org.endeavourhealth.imapi.model.tripletree.TTIriRef;
-import org.endeavourhealth.imapi.model.workflow.roleRequest.UserRole;
 import org.endeavourhealth.imapi.utility.MetricsHelper;
 import org.endeavourhealth.imapi.utility.MetricsTimer;
 import org.endeavourhealth.imapi.vocabulary.GRAPH;
@@ -42,7 +40,10 @@ import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.util.*;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -67,8 +68,9 @@ public class FilerController {
   public ResponseEntity<Map<String, String>> fileDocument(@RequestBody FileDocumentRequest fileDocumentRequest, HttpServletRequest request) throws Exception {
     try (MetricsTimer t = MetricsHelper.recordTime("API.Filer.File.Document.POST")) {
       log.debug("fileDocument");
-      securityService.requiresPermission(new Permission(Resource.DOCUMENT, List.of(UserRole.EDITOR), List.of(new NamespacePermission(fileDocumentRequest.getInsertNamespace(), true, true))), request);
-      User user = securityService.getUser(request);
+      securityService.requiresNamespace(fileDocumentRequest.getInsertNamespace(), true, true);
+      securityService.requiresPermission(Resource.DOCUMENT, Action.WRITE);
+      User user = securityService.getUser();
       String taskId = UUID.randomUUID().toString();
       Map<String, String> response = new HashMap<>();
 
@@ -90,7 +92,7 @@ public class FilerController {
   @Operation(summary = "Retrieves the progress of a document file operation.")
   public ResponseEntity<Map<String, Integer>> getProgress(@PathVariable("taskId") String taskId, HttpServletRequest request) throws UserAuthorisationException {
     log.debug("getProgress");
-    securityService.requiresPermission(new Permission(Resource.DOCUMENT, List.of(UserRole.EDITOR), List.of()), request);
+    securityService.requiresPermission(Resource.DOCUMENT, Action.READ);
     Integer progress = filerService.getTaskProgress(taskId);
     Map<String, Integer> response = new HashMap<>();
     response.put("progress", progress);
@@ -102,8 +104,9 @@ public class FilerController {
   public ResponseEntity<Void> fileEntity(@RequestBody EditRequest editRequest, HttpServletRequest request) throws TTFilerException, IOException, UserAuthorisationException, UserNotFoundException {
     try (MetricsTimer t = MetricsHelper.recordTime("API.Filer.File.Entity.POST")) {
       log.debug("fileEntity");
-      securityService.requiresPermission(new Permission(Resource.ENTITY, List.of(UserRole.EDITOR), List.of(new NamespacePermission(editRequest.getNamespace(), true, true))), request);
-      User user = securityService.getUser(request);
+      securityService.requiresNamespace(editRequest.getNamespace(), true, true);
+      securityService.requiresPermission(Resource.ENTITY, Action.UPDATE);
+      User user = securityService.getUser();
       TTEntity usedEntity = null;
       TTEntity entity = editRequest.getEntity();
       String crud = editRequest.getCrud();
@@ -124,12 +127,14 @@ public class FilerController {
     @RequestParam(name = "entity") String entityIri,
     @RequestParam(name = "oldFolder") String oldFolderIri,
     @RequestParam(name = "newFolder") String newFolderIri,
-    @RequestParam(name = "namespace", defaultValue = "http://endhealth.info/im#") NAMESPACE namespace,
+    @RequestParam(name = "namespace", defaultValue = "http://endhealth.info/im#") String namespaceString,
     HttpServletRequest request
   ) throws Exception {
     try (MetricsTimer t = MetricsHelper.recordTime("API.Filer.Folder.Move.POST")) {
       log.debug("moveFolder");
-      securityService.requiresPermission(new Permission(Resource.FOLDER, List.of(UserRole.EDITOR), List.of(new NamespacePermission(namespace, true, true))), request);
+      NAMESPACE namespace = NAMESPACE.from(namespaceString);
+      securityService.requiresNamespace(namespace, true, true);
+      securityService.requiresPermission(Resource.FOLDER, Action.UPDATE);
 
       if (!entityService.iriExists(entityIri) || !entityService.iriExists(oldFolderIri) || !entityService.iriExists(newFolderIri)) {
         return ProblemDetailResponse.create(HttpStatus.BAD_REQUEST, "Cannot move", "One of the IRIs does not exist");
@@ -162,7 +167,7 @@ public class FilerController {
       folders.add(iri(newFolderIri));
       entity.setVersion(usedEntity.getVersion() + 1).setCrud(iri(IM.UPDATE_PREDICATES));
 
-      User user = securityService.getUser(request);
+      User user = securityService.getUser();
       filerService.fileEntity(entity, user.getUsername(), usedEntity);
 
       return ResponseEntity.ok().build();
@@ -174,12 +179,15 @@ public class FilerController {
   public ResponseEntity<ProblemDetailResponse> addToFolder(
     @RequestParam(name = "entity") String entityIri,
     @RequestParam(name = "folder") String folderIri,
-    @RequestParam(name = "namespace", defaultValue = "http://endhealth.info/im#") NAMESPACE namespace,
+    @RequestParam(name = "namespace", defaultValue = "http://endhealth.info/im#") String namespaceString,
     HttpServletRequest request
   ) throws Exception {
     try (MetricsTimer t = MetricsHelper.recordTime("API.Filer.Folder.Add.POST")) {
       log.debug("addToFolder");
-      securityService.requiresPermission(new Permission(Resource.FOLDER, List.of(UserRole.EDITOR), List.of(new NamespacePermission(namespace, true, true))), request);
+      NAMESPACE namespace = NAMESPACE.from(namespaceString);
+      securityService.requiresNamespace(namespace, true, true);
+      securityService.requiresPermission(Resource.FOLDER, Action.UPDATE);
+
       if (!entityService.iriExists(entityIri) || !entityService.iriExists(folderIri)) {
         return ProblemDetailResponse.create(HttpStatus.BAD_REQUEST, "Cannot add to folder", "One of the IRIs does not exist");
       }
@@ -193,7 +201,7 @@ public class FilerController {
       if (folders == null) folders = new TTArray();
       folders.add(iri(folderIri));
 
-      User user = securityService.getUser(request);
+      User user = securityService.getUser();
       TTEntity usedEntity = entityService.getBundle(entity.getIri(), null).getEntity();
       entity.setVersion(usedEntity.getVersion() + 1).setCrud(iri(IM.UPDATE_PREDICATES));
       filerService.fileEntity(entity, user.getUsername(), usedEntity);
@@ -207,10 +215,12 @@ public class FilerController {
   public String createFolder(
     @RequestParam(name = "container") String container,
     @RequestParam(name = "name") String name,
-    @RequestParam(name = "namespace", defaultValue = "http://endhealth.info/im#") NAMESPACE namespace,
+    @RequestParam(name = "namespace", defaultValue = "http://endhealth.info/im#") String namespaceString,
     HttpServletRequest request
   ) throws Exception {
-    securityService.requiresPermission(new Permission(Resource.FOLDER, List.of(UserRole.CREATOR), List.of(new NamespacePermission(namespace, true, true))), request);
+    NAMESPACE namespace = NAMESPACE.from(namespaceString);
+    securityService.requiresNamespace(namespace, true, true);
+    securityService.requiresPermission(Resource.FOLDER, Action.CREATE);
     try (MetricsTimer t = MetricsHelper.recordTime("API.Filer.Folder.Create.POST")) {
       log.debug("createFolder");
       if (name.isBlank()) {
@@ -255,7 +265,7 @@ public class FilerController {
       }
       entity.set(iri(IM.CONTENT_TYPE), contentTypes);
 
-      User user = securityService.getUser(request);
+      User user = securityService.getUser();
       filerService.fileEntity(entity, user.getUsername(), null);
       return iri;
     }
@@ -266,7 +276,7 @@ public class FilerController {
   public HttpEntity<Object> downloadDeltas(HttpServletRequest request) throws NullPointerException, IOException, UserAuthorisationException {
     try (MetricsTimer t = MetricsHelper.recordTime("API.Filer.Deltas.Download.GET")) {
       log.debug("downloadDeltas");
-      securityService.requiresPermission(new Permission(Resource.DELTA, List.of(UserRole.ADMIN), List.of()), request);
+      securityService.requiresPermission(Resource.DELTA, Action.READ);
       HttpHeaders headers = new HttpHeaders();
 
       // Collect files into Zip

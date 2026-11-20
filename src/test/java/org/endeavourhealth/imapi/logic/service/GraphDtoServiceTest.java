@@ -23,8 +23,10 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 public class GraphDtoServiceTest {
 
-  @Mock EntityRepository entityRepository;
-  @Mock DataModelRepository dataModelRepository;
+  @Mock
+  EntityRepository entityRepository;
+  @Mock
+  DataModelRepository dataModelRepository;
 
   GraphDtoService graphDtoService;
 

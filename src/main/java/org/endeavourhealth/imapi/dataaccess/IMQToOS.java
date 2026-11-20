@@ -2,15 +2,8 @@ package org.endeavourhealth.imapi.dataaccess;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Getter;
-import org.apache.lucene.search.join.ScoreMode;
-import org.elasticsearch.common.unit.Fuzziness;
-import org.elasticsearch.index.query.*;
-import org.elasticsearch.index.query.Operator;
-import org.elasticsearch.index.query.functionscore.ScriptScoreQueryBuilder;
-import org.elasticsearch.script.Script;
-import org.elasticsearch.script.ScriptType;
-import org.elasticsearch.search.builder.SearchSourceBuilder;
-import org.elasticsearch.search.fetch.subphase.FetchSourceContext;
+import org.endeavourhealth.imapi.dataaccess.opensearch.*;
+import org.endeavourhealth.imapi.dataaccess.opensearch.Operator;
 import org.endeavourhealth.imapi.logic.cache.EntityCache;
 import org.endeavourhealth.imapi.model.imq.*;
 import org.endeavourhealth.imapi.model.requests.QueryRequest;
@@ -35,7 +28,7 @@ public class IMQToOS {
     return this;
   }
 
-  public SearchSourceBuilder buildQuery(QueryRequest imRequest, Query oneQuery, TextSearchStyle type, Fuzziness fuzziness) throws QueryException {
+  public SearchSource buildQuery(QueryRequest imRequest, Query oneQuery, TextSearchStyle type, Fuzziness fuzziness) throws QueryException {
     request = imRequest;
     query = oneQuery;
     request.setTextSearch(request.getTextSearch()
@@ -59,86 +52,81 @@ public class IMQToOS {
     throw new QueryException("Valid query type needed");
   }
 
-  public SearchSourceBuilder buildQuery(QueryRequest imRequest, Query oneQuery, TextSearchStyle type) throws QueryException {
+  public SearchSource buildQuery(QueryRequest imRequest, Query oneQuery, TextSearchStyle type) throws QueryException {
     return buildQuery(imRequest, oneQuery, type, Fuzziness.ZERO);
   }
 
-  private SearchSourceBuilder nGramQuery(Fuzziness fuzziness) throws QueryException {
+  private SearchSource nGramQuery(Fuzziness fuzziness) throws QueryException {
 
-    BoolQueryBuilder boolBuilder = new BoolQueryBuilder();
+    BoolQuery boolBuilder = new BoolQuery();
     if (!addMatches(boolBuilder))
       return null;
-    SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
+    SearchSource sourceBuilder = new SearchSource();
     if (!addReturns(sourceBuilder))
       return null;
     String text = request.getTextSearch();
-    MatchQueryBuilder mat = new MatchQueryBuilder("termCode.term", text);
+    MatchQuery mat = new MatchQuery("termCode.term", text);
     mat.analyzer("standard");
     mat.operator(Operator.AND);
     mat.fuzziness(fuzziness);
     Map<String, Object> params = new HashMap<>();
     params.put("term", text);
-    Script script = new Script(ScriptType.INLINE,
-      Script.DEFAULT_SCRIPT_LANG,
+    Script script = new Script(
       "double s= 100000; if (doc['termCode.term.keyword'].value.toLowerCase().startsWith(params.term)) s=200000; return s - doc['termCode.length'].value",
-      Collections.emptyMap(),
       params);
 
-    NestedQueryBuilder nested = buildNested(mat, script);
+    NestedQuery nested = buildNested(mat, script);
     boolBuilder.must(nested);
     sourceBuilder.query(boolBuilder);
     addPages(sourceBuilder);
     return sourceBuilder;
   }
 
-  private SearchSourceBuilder multiWordQuery() throws QueryException {
-    BoolQueryBuilder boolBuilder = new BoolQueryBuilder();
+  private SearchSource multiWordQuery() throws QueryException {
+    BoolQuery boolBuilder = new BoolQuery();
     if (!addMatches(boolBuilder))
       return null;
-    SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
+    SearchSource sourceBuilder = new SearchSource();
     if (!addReturns(sourceBuilder))
       return null;
 
     String text = request.getTextSearch();
     text = text.replace("(", "").replace(")", "").replace("-", "");
-    MatchPhrasePrefixQueryBuilder mfs = new MatchPhrasePrefixQueryBuilder("termCode.term", text);
+    MatchPhrasePrefixQuery mfs = new MatchPhrasePrefixQuery("termCode.term", text);
     mfs.boost(4);
     mfs.analyzer("standard");
     mfs.slop(text.split(" ").length - 1);
     Map<String, Object> params = new HashMap<>();
     params.put("term", text);
-    Script script = new Script(ScriptType.INLINE,
-      Script.DEFAULT_SCRIPT_LANG,
+    Script script = new Script(
       "double s= 100000; if (doc['termCode.term.keyword'].value.toLowerCase().startsWith(params.term)) s=200000; return s - doc['termCode.length'].value",
-      Collections.emptyMap(),
       params);
-    NestedQueryBuilder nested = buildNested(mfs, script);
+    NestedQuery nested = buildNested(mfs, script);
     boolBuilder.must(nested);
     sourceBuilder.query(boolBuilder);
     addPages(sourceBuilder);
     return sourceBuilder;
   }
 
-  private NestedQueryBuilder buildNested(QueryBuilder query, Script script) {
-    ScriptScoreQueryBuilder ssb = new ScriptScoreQueryBuilder(
-      new MatchAllQueryBuilder(),
+  private NestedQuery buildNested(OsQuery query, Script script) {
+    ScriptScoreQuery ssb = new ScriptScoreQuery(
+      new MatchAllQuery(),
       script
     );
 
-    BoolQueryBuilder bqb = new BoolQueryBuilder();
-    bqb.must().add(query);
-    bqb.must().add(new ExistsQueryBuilder("termCode.length"));
-    bqb.should().add(ssb);
+    BoolQuery bqb = new BoolQuery();
+    bqb.must(query);
+    bqb.must(new ExistsQuery("termCode.length"));
+    bqb.should(ssb);
 
     String[] includes = {"termCode.term"};
-    return new NestedQueryBuilder("termCode", bqb, ScoreMode.Max)
-      .innerHit(new InnerHitBuilder()
-        .setFetchSourceContext(new FetchSourceContext(true, includes, null)));
+    return new NestedQuery("termCode", bqb, ScoreMode.MAX)
+      .innerHitsSource(includes);
   }
 
 
-  private SearchSourceBuilder autocompleteQuery() throws QueryException {
-    BoolQueryBuilder boolBuilder = new BoolQueryBuilder();
+  private SearchSource autocompleteQuery() throws QueryException {
+    BoolQuery boolBuilder = new BoolQuery();
     String term = request.getTextSearch();
     if (term.contains(":") && (!term.contains(" "))) {
       String namespace = EntityCache.getDefaultPrefixes().getNamespace(term.substring(0, term.indexOf(":")));
@@ -152,14 +140,14 @@ public class IMQToOS {
     String field = "termCode.keyTerm";
     if (prefix.length() > 31)
       prefix = prefix.substring(0, 30);
-    PrefixQueryBuilder pqb = new PrefixQueryBuilder(field, prefix).caseInsensitive(true);
-    Script script = new Script(ScriptType.INLINE, Script.DEFAULT_SCRIPT_LANG, "100000 - doc['termCode.length'].value", Collections.emptyMap());
-    NestedQueryBuilder nested = buildNested(pqb, script);
+    PrefixQuery pqb = new PrefixQuery(field, prefix).caseInsensitive(true);
+    Script script = new Script("100000 - doc['termCode.length'].value");
+    NestedQuery nested = buildNested(pqb, script);
     boolBuilder.should(nested);
     boolBuilder.minimumShouldMatch(1);
     if (!addMatches(boolBuilder))
       return null;
-    SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
+    SearchSource sourceBuilder = new SearchSource();
     if (!addReturns(sourceBuilder))
       return null;
     sourceBuilder.query(boolBuilder);
@@ -168,8 +156,8 @@ public class IMQToOS {
   }
 
 
-  private SearchSourceBuilder exactQuery() throws QueryException {
-    BoolQueryBuilder boolBuilder = new BoolQueryBuilder();
+  private SearchSource exactQuery() throws QueryException {
+    BoolQuery boolBuilder = new BoolQuery();
     String term = request.getTextSearch();
     if (term.contains(":") && (!term.contains(" "))) {
       String namespace = EntityCache.getDefaultPrefixes().getNamespace(term.substring(0, term.indexOf(":")));
@@ -182,7 +170,7 @@ public class IMQToOS {
     boolBuilder.minimumShouldMatch(1);
     if (!addMatches(boolBuilder))
       return null;
-    SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
+    SearchSource sourceBuilder = new SearchSource();
     if (!addReturns(sourceBuilder))
       return null;
     sourceBuilder.query(boolBuilder);
@@ -190,7 +178,7 @@ public class IMQToOS {
   }
 
 
-  private boolean addMatches(BoolQueryBuilder boolBuilder) throws QueryException {
+  private boolean addMatches(BoolQuery boolBuilder) throws QueryException {
     if (query == null)
       return true;
     if (query.isActiveOnly()) {
@@ -200,12 +188,12 @@ public class IMQToOS {
       if (!addMatch(boolBuilder, query))
         return ignoreInvalid;
     } else {
-      List<Match> ands = query.getAnd();
-      List<Match> ors = query.getOr();
-      for (List<Match> matches : Arrays.asList(ands, ors)) {
-        if (matches != null) {
-          for (Match match : matches) {
-            if (!addMatch(boolBuilder, match)) {
+      List<Query> ands = query.getAnd();
+      List<Query> ors = query.getOr();
+      for (List<Query> queries : Arrays.<List<Query>>asList(ands, ors)) {
+        if (queries != null) {
+          for (Query query : queries) {
+            if (!addMatch(boolBuilder, query)) {
               return ignoreInvalid;
             }
           }
@@ -215,20 +203,20 @@ public class IMQToOS {
     return true;
   }
 
-  private void addCodesAndIri(BoolQueryBuilder boolBuilder, String term) {
-    TermQueryBuilder tqb = new TermQueryBuilder("code", term);
+  private void addCodesAndIri(BoolQuery boolBuilder, String term) {
+    TermQuery tqb = new TermQuery("code", term);
     boolBuilder.should(tqb);
-    TermQueryBuilder tqac = new TermQueryBuilder("alternativeCode", term);
+    TermQuery tqac = new TermQuery("alternativeCode", term);
     boolBuilder.should(tqac);
-    TermQueryBuilder tqiri = new TermQueryBuilder("iri", term);
+    TermQuery tqiri = new TermQuery("iri", term);
     boolBuilder.should(tqiri);
-    TermQueryBuilder tciri = new TermQueryBuilder("termCode.code", term);
+    TermQuery tciri = new TermQuery("termCode.code", term);
     boolBuilder.should(tciri);
 
 
   }
 
-  private void addPages(SearchSourceBuilder sourceBuilder) {
+  private void addPages(SearchSource sourceBuilder) {
     if (request.getPage() != null) {
       if (request.getPage().getOffset() == null) {
         sourceBuilder.size(request.getPage().getPageSize()).from(request.getPage().getPageSize() * (request.getPage().getPageNumber() - 1));
@@ -240,8 +228,8 @@ public class IMQToOS {
     }
   }
 
-  private boolean addReturns(SearchSourceBuilder sourceBuilder) {
-    Set<String> sources = new HashSet<>(List.of("name", "iri", "preferredName", "code", "usageTotal", "type", "scheme", "status"));
+  private boolean addReturns(SearchSource sourceBuilder) {
+    Set<String> sources = new HashSet<>(List.<String>of("name", "iri", "preferredName", "code", "usageTotal", "type", "scheme", "status"));
     if (query == null)
       return true;
     if (query.getReturn() != null) {
@@ -286,51 +274,51 @@ public class IMQToOS {
         }
       }
     }
-    String[] sourceArray = sources.toArray(String[]::new);
-    sourceBuilder.fetchSource(sourceArray, null);
+    String[] sourceArray = sources.<String>toArray(String[]::new);
+    sourceBuilder.fetchSource(sourceArray);
     return true;
   }
 
-  private void addFilterWithId(String property, Set<String> values, Bool bool, BoolQueryBuilder boolBldr) {
-    TermsQueryBuilder tqr = new TermsQueryBuilder(property.equals("iri") ? property : (property + ".iri"), values);
+  private void addFilterWithId(String property, Set<String> values, Bool bool, BoolQuery boolBldr) {
+    TermsQuery tqr = new TermsQuery(property.equals("iri") ? property : (property + ".iri"), values);
     if (Bool.and == bool) boolBldr.filter(tqr);
     else if (Bool.or == bool) boolBldr.should(tqr);
   }
 
-  private void addFilter(Set<String> values, Bool bool, BoolQueryBuilder boolBldr) {
-    TermsQueryBuilder tqr = new TermsQueryBuilder("binding", values);
+  private void addFilter(Set<String> values, Bool bool, BoolQuery boolBldr) {
+    TermsQuery tqr = new TermsQuery("binding", values);
     if (Bool.and == bool) boolBldr.filter(tqr);
     else if (Bool.or == bool) boolBldr.should(tqr);
   }
 
-  private boolean addMatch(BoolQueryBuilder boolBuilder, Match match) throws QueryException {
-    if (match.getAnd() != null || match.getOr() != null)
+  private boolean addMatch(BoolQuery boolBuilder, Query query) throws QueryException {
+    if (query.getAnd() != null || query.getOr() != null)
       return false;
-    if (match.getTypeOf() != null) {
-      addFilterWithId("type", getIriFromAlias(match.getTypeOf()), Bool.and, boolBuilder);
+    if (query.getTypeOf() != null) {
+      addFilterWithId("type", getIriFromAlias(query.getTypeOf()), Bool.and, boolBuilder);
     }
 
-    if (match.getIs() != null) {
-      setFromAliases(boolBuilder, match.getIs());
+    if (query.getIs() != null) {
+      setFromAliases(boolBuilder, query.getIs());
     }
-    return addProperties(boolBuilder, match);
+    return addProperties(boolBuilder, query);
   }
 
-  private boolean addProperties(BoolQueryBuilder boolBuilder, Match match) throws QueryException {
-    if (match.getPath() != null) {
-      for (Path pathMatch : match.getPath()) {
+  private boolean addProperties(BoolQuery boolBuilder, Query query) throws QueryException {
+    if (query.getPath() != null) {
+      for (Path pathMatch : query.getPath()) {
         String w = pathMatch.getIri();
         if (IM.BINDING.toString().equals(w)) {
-          addBinding(match, match.getOr() != null ? Bool.or : Bool.and, boolBuilder);
+          addBinding(query, query.getOr() != null ? Bool.or : Bool.and, boolBuilder);
           return true;
         }
       }
     }
-    if (match.getWhere() == null)
+    if (query.getWhere() == null)
       return true;
-    Where where = match.getWhere();
+    Where where = query.getWhere();
     if (isBooleanWhere(where)) {
-      BoolQueryBuilder nestedBool = new BoolQueryBuilder();
+      BoolQuery nestedBool = new BoolQuery();
       if (!addBoolProperties(where, nestedBool)) return false;
       boolBuilder.filter(nestedBool);
     } else return addProperty(where, Bool.and, boolBuilder);
@@ -338,14 +326,13 @@ public class IMQToOS {
     return true;
   }
 
-  private boolean addProperty(Where where, Bool bool, BoolQueryBuilder boolBldr) throws QueryException {
+  private boolean addProperty(Where where, Bool bool, BoolQuery boolBldr) throws QueryException {
     String w = where.getIri();
-    if (w==null &&(where.getAnd()!=null||where.getOr()!=null)) {
-      BoolQueryBuilder nestedBool = new BoolQueryBuilder();
-      if (bool ==Bool.and){
+    if (w == null && (where.getAnd() != null || where.getOr() != null)) {
+      BoolQuery nestedBool = new BoolQuery();
+      if (bool == Bool.and) {
         boolBldr.must(nestedBool);
-      }
-      else boolBldr.should(nestedBool);
+      } else boolBldr.should(nestedBool);
       if (!addBoolProperties(where, nestedBool)) return false;
       else return true;
     }
@@ -368,8 +355,8 @@ public class IMQToOS {
     } else return RDFS.DOMAIN.toString().equals(w);
   }
 
-  private boolean addBoolProperties(Where where, BoolQueryBuilder nestedBool) throws QueryException {
-    for (List<Where> nested : Arrays.asList(where.getOr(), where.getAnd())) {
+  private boolean addBoolProperties(Where where, BoolQuery nestedBool) throws QueryException {
+    for (List<Where> nested : Arrays.<List<Where>>asList(where.getOr(), where.getAnd())) {
       if (nested != null) {
         for (Where nestedWhere : nested) {
           if (!addProperty(nestedWhere, where.getAnd() != null ? Bool.and : Bool.or, nestedBool)) return false;
@@ -383,7 +370,7 @@ public class IMQToOS {
     return where.getAnd() != null || where.getOr() != null;
   }
 
-  private boolean addIsFilter(String property, Where where, Bool bool, BoolQueryBuilder boolBldr) throws QueryException {
+  private boolean addIsFilter(String property, Where where, Bool bool, BoolQuery boolBldr) throws QueryException {
     if (where.getIs() != null) {
       Set<String> isList = new HashSet<>();
       for (Node is : where.getIs()) {
@@ -392,10 +379,10 @@ public class IMQToOS {
       addFilterWithId(property, isList, bool, boolBldr);
       return true;
     } else if (where.getIsNull()) {
-      boolBldr.should(QueryBuilders.boolQuery().mustNot(QueryBuilders.existsQuery(property)));
+      boolBldr.should(new BoolQuery().mustNot(new ExistsQuery(property)));
       return true;
     } else if (where.getIsNotNull()) {
-      boolBldr.should(QueryBuilders.boolQuery().must(QueryBuilders.existsQuery(property)));
+      boolBldr.should(new BoolQuery().must(new ExistsQuery(property)));
       return true;
     }
     return false;
@@ -447,24 +434,24 @@ public class IMQToOS {
           iris.addAll(resolved);
         else throw new QueryException("unable to resolve reference " + node.getParameter() + " in where clause");
       } else
-        throw new QueryException("Match clause has no iri or parameter for type of");
+        throw new QueryException("Query clause has no iri or parameter for type of");
     } else iris.add(node.getIri());
     return iris;
   }
 
-  private void addBinding(Match match, Bool bool, BoolQueryBuilder boolBldr) throws QueryException {
+  private void addBinding(Query query, Bool bool, BoolQuery boolBldr) throws QueryException {
     try {
       String node = null;
       String path = null;
-      if (match.getWhere().getIri() != null) {
-        Where binding = match.getWhere();
+      if (query.getWhere().getIri() != null) {
+        Where binding = query.getWhere();
         if (binding.getIri().equals(SHACL.PATH.toString())) {
           path = binding.getIs().getFirst().getIri();
         } else if (binding.getIri().equals(SHACL.NODE.toString())) {
           node = binding.getIs().getFirst().getIri();
         }
-      } else if (match.getWhere().getAnd() != null) {
-        for (Where binding : match.getWhere().getAnd()) {
+      } else if (query.getWhere().getAnd() != null) {
+        for (Where binding : query.getWhere().getAnd()) {
           if (binding.getIri().equals(SHACL.PATH.toString())) {
             path = binding.getIs().getFirst().getIri();
           } else if (binding.getIri().equals(SHACL.NODE.toString())) {
@@ -473,18 +460,16 @@ public class IMQToOS {
         }
       }
       if (path == null || node == null)
-        throw new QueryException("Invalid binding in where clause. Should have match where path and match where node");
-      addFilter(Set.of(path + " " + node), bool, boolBldr);
+        throw new QueryException("Invalid binding in where clause. Should have query where path and query where node");
+      addFilter(Set.<String>of(path + " " + node), bool, boolBldr);
     } catch (Exception e) {
-      throw new QueryException("Invalid binding in where clause. Should have match where path and match where node");
+      throw new QueryException("Invalid binding in where clause. Should have query where path and query where node");
     }
   }
 
-  private void setFromAliases(BoolQueryBuilder boolBuilder, List<Node> types) throws QueryException {
+  private void setFromAliases(BoolQuery boolBuilder, Node type) throws QueryException {
     Map<String, Set<String>> instanceFilters = new HashMap<>();
-    for (Node type : types) {
-      setFromAlias(type, instanceFilters);
-    }
+    setFromAlias(type, instanceFilters);
     if (!instanceFilters.isEmpty()) {
       for (Map.Entry<String, Set<String>> entry : instanceFilters.entrySet()) {
         addFilterWithId(entry.getKey(), entry.getValue(), Bool.and, boolBuilder);
@@ -523,17 +508,17 @@ public class IMQToOS {
           addToInstanceFilters(type, element.get("iri").asText(), instanceFilters);
         }
       } else
-        throw new QueryException("Match clause has no iri, parameter or no parent results");
+        throw new QueryException("Query clause has no iri, parameter or no parent results");
 
     } else {
-      throw new QueryException("Match clause has no iri, parameter or node reference");
+      throw new QueryException("Query clause has no iri, parameter or node reference");
     }
   }
 
   private void addToInstanceFilters(Node type, String iri, Map<String, Set<String>> instanceFilters) {
-    if (type.isDescendantsOrSelfOf())
+    if (type.getEntails()==Entail.descendantsOrSelfOf)
       instanceFilters.computeIfAbsent("isA", i -> new HashSet<>()).add(iri);
-    else if (type.isMemberOf())
+    else if (type.getEntails()==Entail.memberOf)
       instanceFilters.computeIfAbsent("isMemberOf", i -> new HashSet<>()).add(iri);
     else
       instanceFilters.computeIfAbsent("iri", i -> new HashSet<>()).add(iri);

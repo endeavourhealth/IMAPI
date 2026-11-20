@@ -12,6 +12,7 @@ import java.util.stream.Collectors;
 
 import static org.endeavourhealth.imapi.model.tripletree.TTIriRef.iri;
 
+
 public enum IM implements VocabEnum {
 
     DOMAIN("http://endhealth.info/"),
@@ -21,11 +22,8 @@ public enum IM implements VocabEnum {
     HAS_SUBTYPES(NAMESPACE.IM + "hasSubtypes"),
     HAS_VALUESET(NAMESPACE.IM + "hasValueSet"),
     VALUE_SET(NAMESPACE.IM + "ValueSet"),
-    DESCENDANTS_OR_SELF_OF(NAMESPACE.IM + "DescendantsOrSelfOf"),
-    DESCENDANTS_OF(NAMESPACE.IM + "DescendantsOf"),
     IS_RELATIVE_VALUE(NAMESPACE.IM + "isRelativeValue"),
     FULLY_SPECIFIED_NAME(NAMESPACE.IM + "fullySpecifiedName"),
-    ANCESTORS_OF(NAMESPACE.IM + "AncestorsOf"),
     ENTAILED_MEMBER(NAMESPACE.IM + "entailedMember"),
     ENTAILMENT(NAMESPACE.IM + "entailment"),
     EXCLUDE(NAMESPACE.IM + "exclude"),
@@ -51,6 +49,8 @@ public enum IM implements VocabEnum {
     RETURN_TYPE(NAMESPACE.IM + "returnType"),
     UPDATE_PROCEDURE(NAMESPACE.IM + "updateProcedure"),
     CONCEPT(NAMESPACE.IM + "Concept"),
+    SEMANTIC_MAP(NAMESPACE.IM + "SemanticMap"),
+    HAS_ENTRY(NAMESPACE.IM + "hasEntry"),
     CODEABLE(NAMESPACE.IM + "Codeable"),
     CONCEPT_PROPERTY(NAMESPACE.IM + "concept"),
     CONCEPT_SET(NAMESPACE.IM + "ConceptSet"),
@@ -113,7 +113,17 @@ public enum IM implements VocabEnum {
     MAPPED_TO(NAMESPACE.IM + "mappedTo"),
     HAS_NUMERIC(NAMESPACE.IM + "hasNumericValue"),
     SOURCE_TEXT(NAMESPACE.IM + "sourceText"),
+    IN_SEMANTIC_MAP(NAMESPACE.IM + "inSemanticMap"),
+    SOURCE_ENTITY(NAMESPACE.IM + "sourceEntity"),
+    SOURCE_TYPE(NAMESPACE.IM + "sourceType"),
+    SOURCE_ENTITY_PROPERTY(NAMESPACE.IM + "sourceEntityProperty"),
+    SOURCE_VALUE_PROPERTY(NAMESPACE.IM + "sourceValueProperty"),
+    RANGE_FROM(NAMESPACE.IM + "rangeFrom"),
+    RANGE_TO(NAMESPACE.IM + "rangeTo"),
     TARGET_TEXT(NAMESPACE.IM + "targetText"),
+    TARGET_VALUE(NAMESPACE.IM + "targetValue"),
+     MAP_ENTRY(NAMESPACE.IM + "MapEntry"),
+     HAS_MAP_ENTRY(NAMESPACE.IM + "hasMapEntry"),
     HAS_TERM_CODE(NAMESPACE.IM + "hasTermCode"),
     ALTERNATIVE_CODE(NAMESPACE.IM + "alternativeCode"),
     DESCRIPTION_ID(NAMESPACE.IM + "descriptionId"),
@@ -152,6 +162,7 @@ public enum IM implements VocabEnum {
     PROV_UPDATE(NAMESPACE.IM + "1661000252106"),
     USES(NAMESPACE.IM + "uses"),
     COUNT(NAMESPACE.IM + "Count"),
+    MEMBER_COUNT(NAMESPACE.IM + "memberCount"),
     SUM(NAMESPACE.IM + "Sum"),
     AVERAGE(NAMESPACE.IM + "Average"),
     MIN(NAMESPACE.IM + "Min"),
@@ -268,6 +279,7 @@ public enum IM implements VocabEnum {
     PARAMETER_TEMPLATE(NAMESPACE.IM + "parameterTemplate"),
     VALUE_TEMPLATE(NAMESPACE.IM + "valueTemplate"),
     DEFAULT_VALUE(NAMESPACE.IM + "defaultValue"),
+    DEFAULT_TEXT(NAMESPACE.IM + "defaultText"),
     LOAD_MORE(NAMESPACE.IM + "loadMore"),
     DATA_MODEL_PROPERTY_CONCEPT(NAMESPACE.IM + "concept"),
     NUMERIC_VALUE(NAMESPACE.IM + "NumericValue"),

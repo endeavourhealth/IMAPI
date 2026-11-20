@@ -18,7 +18,8 @@ import java.io.*;
 import java.nio.file.Path;
 import java.text.Format;
 import java.text.SimpleDateFormat;
-import java.util.*;
+import java.util.Collections;
+import java.util.List;
 
 @Slf4j
 public class SetMemberExport {
@@ -28,6 +29,10 @@ public class SetMemberExport {
   private static final String SECRET_ACCESS_KEY = System.getenv("AWS_SECRET_ACCESS_KEY");
   private static final String BUCKET_REGION = System.getenv("BUCKET_REGION");
   private static final String BUCKET_NAME = System.getenv("BUCKET_NAME");
+
+  private SetMemberExport() {
+    // prevent instantiation - static methods only
+  }
 
   public static void execute(Path basePath) {
     SetMemberExport.execute(basePath, Collections.emptyList());
@@ -59,15 +64,19 @@ public class SetMemberExport {
         exportToBucket(conceptBuilder.toString(), baseFilename + "_tct_members.csv");
         exportToBucket(conceptSetBuilder.toString(), baseFilename + "_set_members.csv");
       } else {
-        try (FileWriter fw = new FileWriter(baseFilename + "_tct_members.csv")) {
-          fw.write(conceptBuilder.toString());
-        } catch (IOException e) {
-          log.error("Failed to export file: {}", baseFilename + "_tct_members.csv", e);
+        if (!conceptBuilder.toString().isEmpty()) {
+          try (FileWriter fw = new FileWriter(baseFilename + "_tct_members.csv")) {
+            fw.write(conceptBuilder.toString());
+          } catch (IOException e) {
+            log.error("Failed to export file: {}", baseFilename + "_tct_members.csv", e);
+          }
         }
-        try (FileWriter fwSet = new FileWriter(baseFilename + "_set_members.csv")) {
-          fwSet.write(conceptSetBuilder.toString());
-        } catch (IOException e) {
-          log.error("Failed to export file: {}", baseFilename + "_set_members.csv", e);
+        if (!conceptSetBuilder.toString().isEmpty()) {
+          try (FileWriter fwSet = new FileWriter(baseFilename + "_set_members.csv")) {
+            fwSet.write(conceptSetBuilder.toString());
+          } catch (IOException e) {
+            log.error("Failed to export file: {}", baseFilename + "_set_members.csv", e);
+          }
         }
       }
     }
@@ -75,26 +84,26 @@ public class SetMemberExport {
   }
 
   private static void executeConcept(StringBuilder builder, String iri) {
-    try (IMDB conn = IMDB.getConnection()) {
+    try (IMDB conn = IMDB.Companion.getConnection()) {
       SetMemberExport.runExport(builder, conn, """
-        select ?set ?member ?im1Id
+        select ?set ?member ?im1DbId
         where {
             ?set rdf:type im:Concept ;
                 ^rdfs:subClassOf* ?member .
-            ?member im:im1Id ?im1Id .
+            ?member im:im1DbId ?im1DbId .
         }
         """, iri);
     }
   }
 
   private static void executeConceptSet(StringBuilder builder, String iri) {
-    try (IMDB conn = IMDB.getConnection()) {
+    try (IMDB conn = IMDB.Companion.getConnection()) {
       SetMemberExport.runExport(builder, conn, """
-        select ?set ?member ?im1Id
+        select ?set ?member ?im1DbId
         where {
             ?set rdf:type im:ConceptSet ;
                 im:hasMember ?member .
-            ?member im:im1Id ?im1Id .
+            ?member im:im1DbId ?im1DbId .
         }
         """, iri);
     }
@@ -125,9 +134,9 @@ public class SetMemberExport {
       BindingSet bs = rs.next();
       String set = bs.getValue("set").stringValue();
       String member = bs.getValue("member").stringValue();
-      String im1Id = bs.getValue("im1Id") == null ? "" : bs.getValue("im1Id").stringValue();
+      String im1DbId = bs.getValue("im1DbId") == null ? "" : bs.getValue("im1DbId").stringValue();
 
-      builder.append(set).append("\t").append(member).append("\t").append(im1Id).append("\n");
+      builder.append(set).append("\t").append(member).append("\t").append(im1DbId).append("\n");
 
       if (++members % 100_000 == 0)
         log.info("Exported {} members...", members);
@@ -156,9 +165,5 @@ public class SetMemberExport {
 
       client.putObject(objRequest, RequestBody.fromInputStream(stream, byteData.length));
     }
-  }
-
-  private SetMemberExport() {
-    // prevent instantiation - static methods only
   }
 }

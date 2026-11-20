@@ -1,6 +1,7 @@
 package org.endeavourhealth.imapi.logic.service;
 
 import org.endeavourhealth.imapi.dataaccess.EntityRepository;
+import org.endeavourhealth.imapi.errorhandling.DataMissingException;
 import org.endeavourhealth.imapi.model.EntityReferenceNode;
 import org.endeavourhealth.imapi.model.search.SearchResultSummary;
 import org.endeavourhealth.imapi.model.tripletree.*;
@@ -24,11 +25,12 @@ import static org.endeavourhealth.imapi.model.tripletree.TTIriRef.iri;
 import static org.endeavourhealth.imapi.vocabulary.VocabUtils.asArrayList;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class EntityModelServiceTest {
-  @Mock EntityRepository entityRepository;
+  @Mock
+  EntityRepository entityRepository;
 
   EntityService entityService;
 
@@ -40,7 +42,7 @@ class EntityModelServiceTest {
   @Test
   void getEntityPredicates_nullIriPredicates() {
     TTEntity entity = new TTEntity();
-    when(entityRepository.getBundle(isNull(), isNull())).thenReturn(new TTBundle().setEntity(entity));
+//    when(entityRepository.getBundle(isNull(), isNull())).thenReturn(new TTBundle().setEntity(entity));
 
     TTBundle actual = entityService.getBundle(null, null);
     assertNotNull(actual);
@@ -50,7 +52,7 @@ class EntityModelServiceTest {
   @Test
   void getEntityPredicates_EmptyIri() {
     TTEntity entity = new TTEntity();
-    when(entityRepository.getBundle(any(), isNull())).thenReturn(new TTBundle().setEntity(entity));
+//    when(entityRepository.getBundle(any(), isNull())).thenReturn(new TTBundle().setEntity(entity));
 
     TTBundle actual = entityService.getBundle("", null);
     assertNotNull(actual);
@@ -174,17 +176,10 @@ class EntityModelServiceTest {
 
   @Test
   void getImmediateParents_NotNullIriAndInactiveTrue() {
-
-    EntityReferenceNode entityReferenceNode = new EntityReferenceNode()
-      .setChildren(Collections.singletonList(
-        new EntityReferenceNode("http://endhealth.info/im#25451000252115",
-          "Adverse reaction to Amlodipine Besilate")))
-      .setParents(Collections.singletonList(
-        new EntityReferenceNode("http://endhealth.info/im#25451000252115",
-          "Adverse reaction to Amlodipine Besilate")));
+    TTIriRef parent = new TTIriRef("http://endhealth.info/im#25451000252115", "Adverse reaction to Amlodipine Besilate");
     when(entityRepository.findImmediateParentsByIri("http://endhealth.info/im#25451000252115", null,
-      0, 20, true))
-      .thenReturn(Collections.singletonList(entityReferenceNode));
+      null, 0, 20, true))
+      .thenReturn(Collections.singletonList(parent));
     TTArray ttArray = new TTArray()
       .add(iri("http://endhealth.info/im#25451000252115", "Adverse reaction caused by drug (disorder)"));
     when(entityRepository.getEntityTypes(any())).thenReturn(ttArray);
@@ -197,12 +192,10 @@ class EntityModelServiceTest {
 
   @Test
   void getImmediateParents_NotNullIriAndInactiveFalse() {
-    EntityReferenceNode entityReferenceNode = new EntityReferenceNode()
-      .setChildren(Collections.singletonList(new EntityReferenceNode("http://endhealth.info/im#25451000252115")))
-      .setParents(Collections.singletonList(new EntityReferenceNode("http://endhealth.info/im#25451000252115")));
-    when(entityRepository.findImmediateParentsByIri("http://endhealth.info/im#25451000252115", null,
+    TTIriRef parent = new TTIriRef("http://endhealth.info/im#25451000252115", "Adverse reaction to Amlodipine Besilate");
+    when(entityRepository.findImmediateParentsByIri("http://endhealth.info/im#25451000252115", null, null,
       0, 10, false))
-      .thenReturn(Collections.singletonList(entityReferenceNode));
+      .thenReturn(Collections.singletonList(parent));
     TTArray ttArray = new TTArray().add(iri("http://endhealth.info/im#25451000252115", "Adverse reaction caused by drug (disorder)"));
     when(entityRepository.getEntityTypes(any())).thenReturn(ttArray);
     List<EntityReferenceNode> actual = entityService.getImmediateParents
@@ -316,13 +309,13 @@ class EntityModelServiceTest {
   }
 
   @Test
-  void getSummary_NullIri() {
+  void getSummary_NullIri() throws DataMissingException {
     SearchResultSummary actual = entityService.getSummary(null);
     assertNull(actual);
   }
 
   @Test
-  void getSummary_NotNullIri() {
+  void getSummary_NotNullIri() throws DataMissingException {
     SearchResultSummary summary = new SearchResultSummary();
     when(entityRepository.getEntitySummaryByIri(any())).thenReturn(summary);
     SearchResultSummary actual = entityService.getSummary("anyIri");
@@ -401,7 +394,7 @@ class EntityModelServiceTest {
   @Test
   void getConceptList_EmptyIri() {
     TTEntity entity = new TTEntity();
-    when(entityRepository.getBundle(any(), isNull())).thenReturn(new TTBundle().setEntity(entity));
+//    when(entityRepository.getBundle(any(), isNull())).thenReturn(new TTBundle().setEntity(entity));
 
     TTDocument actual = entityService.getConceptList(Collections.singletonList(""));
     assertNotNull(actual);
@@ -413,5 +406,39 @@ class EntityModelServiceTest {
     when(entityRepository.getBundle(any(), isNull())).thenReturn(new TTBundle().setEntity(entity));
     TTDocument actual = entityService.getConceptList(Collections.singletonList("http://endhealth.info/im#25451000252115"));
     assertNotNull(actual);
+  }
+
+  @Test
+  void usages_typesAreLoadedInOneBatch() {
+    String iri = "http://endhealth.info/im#25451000252115";
+    when(entityRepository.getByNamespace(any())).thenReturn(Collections.emptySet());
+    when(entityRepository.getConceptUsages(eq(iri), eq(0), eq(10))).thenReturn(Arrays.asList(
+      new TTIriRef("http://example.org/a", "A"),
+      new TTIriRef("http://example.org/b", "B"),
+      new TTIriRef(iri, "Self")));
+    TTArray typesOfA = new TTArray().add(new TTIriRef("http://endhealth.info/im#Concept", "Concept"));
+    when(entityRepository.getTypesForEntities(argThat(c -> c.size() == 2 && c.contains("http://example.org/a") && c.contains("http://example.org/b"))))
+      .thenReturn(java.util.Map.of("http://example.org/a", typesOfA));
+
+    List<TTEntity> actual = entityService.usages(iri, 0, 10);
+
+    assertEquals(2, actual.size());
+    assertEquals("http://example.org/a", actual.get(0).getIri());
+    assertEquals(typesOfA, actual.get(0).getType());
+    assertNull(actual.get(1).getType());
+    verify(entityRepository, never()).getBundle(anyString(), any());
+    verify(entityRepository, times(1)).getTypesForEntities(any());
+  }
+
+  @Test
+  void usages_missingPageSizeIsCapped() {
+    String iri = "http://endhealth.info/im#25451000252115";
+    when(entityRepository.getByNamespace(any())).thenReturn(Collections.emptySet());
+    when(entityRepository.getConceptUsages(eq(iri), eq(0), eq(EntityService.MAX_USAGES))).thenReturn(Collections.emptyList());
+    when(entityRepository.getTypesForEntities(any())).thenReturn(java.util.Map.of());
+
+    assertTrue(entityService.usages(iri, null, null).isEmpty());
+
+    verify(entityRepository).getConceptUsages(iri, 0, EntityService.MAX_USAGES);
   }
 }

@@ -32,7 +32,7 @@ public class TaskFilerRdf4j {
   private EmailService emailService;
 
   public TaskFilerRdf4j() {
-    conn = WorkflowDB.getConnection();
+    conn = WorkflowDB.Companion.getConnection();
   }
 
   private static StringJoiner getTaskUpdateSparql(String originalObject, String newObject) {

@@ -1,26 +1,24 @@
 package org.endeavourhealth.imapi.logic.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.endeavourhealth.imapi.dataaccess.DataModelRepository;
 import org.endeavourhealth.imapi.dataaccess.EntityRepository;
 import org.endeavourhealth.imapi.dataaccess.QueryRepository;
 import org.endeavourhealth.imapi.errorhandling.SQLConversionException;
-import org.endeavourhealth.imapi.logic.reasoner.LogicOptimizer;
-import org.endeavourhealth.imapi.model.iml.IMLLanguage;
 import org.endeavourhealth.imapi.model.iml.Indicator;
 import org.endeavourhealth.imapi.model.imq.*;
 import org.endeavourhealth.imapi.model.requests.QueryRequest;
-import org.endeavourhealth.imapi.model.sql.IMQtoSQLConverterKotlin;
 import org.endeavourhealth.imapi.model.sql.SubQueryDependency;
 import org.endeavourhealth.imapi.model.tripletree.TTBundle;
 import org.endeavourhealth.imapi.model.tripletree.TTEntity;
 import org.endeavourhealth.imapi.model.tripletree.TTIriRef;
 import org.endeavourhealth.imapi.model.tripletree.TTValue;
+import org.endeavourhealth.imapi.queryengine.LogicOptimizer;
 import org.endeavourhealth.imapi.queryengine.QueryDescriptor;
 import org.endeavourhealth.imapi.queryengine.QueryValidator;
+import org.endeavourhealth.imapi.transforms.imqtosql.IMQtoSQLConverterKotlin;
+import org.endeavourhealth.imapi.utility.SharedObjectMapper;
 import org.endeavourhealth.imapi.vocabulary.*;
 import org.springframework.stereotype.Component;
 
@@ -42,8 +40,8 @@ public class QueryService {
     return new QueryDescriptor().describeQuery(query, displayMode);
   }
 
-  public Match describeMatch(Match match) throws QueryException {
-    return new QueryDescriptor().describeSingleMatch(match);
+  public Query describeMatch(Query query) throws QueryException {
+    return new QueryDescriptor().describeSingleMatch(query);
   }
 
   public Query describeQuery(String queryIri, DisplayMode displayMode) throws JsonProcessingException, QueryException {
@@ -56,7 +54,7 @@ public class QueryService {
       String denominator = bundle.getEntity().get(IM.DENOMINATOR).getElements().getFirst().asIriRef().getIri();
       String numerator = bundle.getEntity().get(IM.NUMERATOR).getElements().getFirst().asIriRef().getIri();
       String dataset = bundle.getEntity().get(IM.HAS_DATASET).getElements().getFirst().asIriRef().getIri();
-      return new IMQtoSQLConverterKotlin(queryRequest, new ObjectMapper(), denominator, numerator, dataset).getSql();
+      return new IMQtoSQLConverterKotlin(queryRequest, SharedObjectMapper.INSTANCE, denominator, numerator, dataset).getSql();
     }
     QueryRequest queryRequestForSql = getQueryRequestForSqlConversion(queryRequest);
     return new IMQtoSQLConverterKotlin(queryRequestForSql).getSql();
@@ -66,6 +64,12 @@ public class QueryService {
     QueryRequest queryRequest = new QueryRequest().setQuery(new Query().setIri(queryIri)).setLanguage(lang);
     QueryRequest queryRequestForSql = getQueryRequestForSqlConversion(queryRequest);
     return new IMQtoSQLConverterKotlin(queryRequestForSql).getSql();
+  }
+
+  public String getSQLPatientTraceFromIMQIri(String queryIri, String patientId, DatabaseOption lang) throws JsonProcessingException, SQLConversionException {
+    QueryRequest queryRequest = new QueryRequest().setQuery(new Query().setIri(queryIri)).setLanguage(lang);
+    QueryRequest queryRequestForSql = getQueryRequestForSqlConversion(queryRequest);
+    return new IMQtoSQLConverterKotlin(queryRequestForSql, SharedObjectMapper.INSTANCE, null, null, null, patientId).getSql();
   }
 
   public QueryRequest getQueryRequestForSqlConversion(QueryRequest queryRequest) throws SQLConversionException, JsonProcessingException {
@@ -88,7 +92,9 @@ public class QueryService {
       query = queryRequest.getQuery();
     }
     try {
-      new LogicOptimizer().resolveLogic(query, DisplayMode.LOGICAL);
+      query = describeQuery(query, DisplayMode.LOGICAL);
+      LogicOptimizer.optimiseAgeWheres(query);
+      LogicOptimizer.injectRelativeToReturns(query);
     } catch (Exception e) {
       throw new SQLConversionException(e.getMessage(), e);
     }
@@ -108,7 +114,7 @@ public class QueryService {
     if (cohort != null) {
       Query cohortQuery = cohort.get(iri(IM.DEFINITION)).asLiteral().objectValue(Query.class);
       defaultQuery.setTypeOf(cohortQuery.getTypeOf());
-      defaultQuery.addIs(new Node().setIri(cohort.getIri()).setMemberOf(true));
+      defaultQuery.setIs(new Node().setIri(cohort.getIri()).setEntails(Entail.memberOf));
       return defaultQuery;
     } else return null;
   }
@@ -134,7 +140,7 @@ public class QueryService {
   }
 
   public Query flattenQuery(Query query) {
-    LogicOptimizer.optimizeQuery(query);
+    //LogicOptimizer.optimizeQuery(query);
     return query;
   }
 
@@ -145,6 +151,8 @@ public class QueryService {
 
   public Query getQueryFromIri(String iri) throws JsonProcessingException, QueryException {
     TTEntity queryEntity = entityRepository.getEntityPredicates(iri, Set.of(IM.DEFINITION.toString())).getEntity();
+    if (queryEntity == null || queryEntity.get(IM.DEFINITION) == null)
+      throw new QueryException("No query definition found for " + iri);
     Query query = queryEntity.get(IM.DEFINITION).asLiteral().objectValue(Query.class);
     new QueryDescriptor().describeQuery(query, DisplayMode.ORIGINAL);
     return query;
@@ -169,28 +177,26 @@ public class QueryService {
     checkMatchArguments(query, missingArguments, arguments);
   }
 
-  private void checkMatchArguments(Match match, List<ArgumentReference> missingArguments, Set<Argument> arguments) {
-    if (null != match.getParameter() && arguments.stream().noneMatch(argument -> argument.getParameter().equals(match.getParameter()))) {
-      addMissingArgument(missingArguments, match.getParameter(), match.getIri());
+  private void checkMatchArguments(Query query, List<ArgumentReference> missingArguments, Set<Argument> arguments) {
+    if (null != query.getParameter() && arguments.stream().noneMatch(argument -> argument.getParameter().equals(query.getParameter()))) {
+      addMissingArgument(missingArguments, query.getParameter(), query.getIri());
     }
-    if (null != match.getIs()) {
-      List<Node> instances = match.getIs();
-      instances.forEach(instance -> {
-        if (null != instance.getParameter() && arguments.stream().noneMatch(argument -> argument.getParameter().equals(instance.getParameter()))) {
-          addMissingArgument(missingArguments, instance.getParameter(), instance.getIri());
-        }
-      });
+    if (null != query.getIs()) {
+      Node instance = query.getIs();
+      if (null != instance.getParameter() && arguments.stream().noneMatch(argument -> argument.getParameter().equals(instance.getParameter()))) {
+        addMissingArgument(missingArguments, instance.getParameter(), instance.getIri());
+      }
     }
-    if (null != match.getAnd()) {
-      List<Match> matches = match.getAnd();
-      matches.forEach(andMatch -> checkMatchArguments(andMatch, missingArguments, arguments));
+    if (null != query.getAnd()) {
+      List<Query> queries = query.getAnd();
+      queries.forEach(andMatch -> checkMatchArguments(andMatch, missingArguments, arguments));
     }
-    if (null != match.getOr()) {
-      List<Match> matches = match.getOr();
-      matches.forEach(orMatch -> checkMatchArguments(orMatch, missingArguments, arguments));
+    if (null != query.getOr()) {
+      List<Query> queries = query.getOr();
+      queries.forEach(orMatch -> checkMatchArguments(orMatch, missingArguments, arguments));
     }
-    if (null != match.getWhere()) {
-      recursivelyCheckWhereArguments(match.getWhere(), missingArguments, arguments);
+    if (null != query.getWhere()) {
+      recursivelyCheckWhereArguments(query.getWhere(), missingArguments, arguments);
     }
   }
 
@@ -246,8 +252,8 @@ public class QueryService {
     }
   }
 
-  public Query expandCohort(String queryIri, String cohortIri, DisplayMode displayMode) throws JsonProcessingException, QueryException {
-    Query query = new QueryRepository().expandCohort(queryIri, cohortIri, displayMode);
+  public Query expandCohort(String cohortIri, DisplayMode displayMode) throws JsonProcessingException, QueryException {
+    Query query = new QueryRepository().expandCohort(cohortIri, displayMode);
     query = new QueryDescriptor().describeQuery(query, displayMode);
     return query;
   }
@@ -297,4 +303,47 @@ public class QueryService {
     }
     return query;
   }
+
+  public Query validateMatch(Query query) {
+    QueryValidator validator = new QueryValidator();
+    query.setInvalid(false);
+    try {
+      validator.validateSingleMatch(query);
+    } catch (Exception e) {
+      query.setInvalid(true);
+      query.setErrorMessage(e.getMessage());
+    }
+    return query;
+  }
+
+  public Set<TTEntity> getSemanticMaps(String sourceIri) {
+    return new QueryRepository().getSemanticMapsForSourceIri(sourceIri);
+  }
+
+  public void checkDependency(TTEntity report, Query query) {
+    if (query == null) return;
+    if (query.getIs()!=null){
+        if (query.getIs().isCohort()){
+          report.addObject(iri(IM.DENOMINATOR), iri(query.getIs().getIri()));
+        }
+      }
+    checkClauseDependency(report, query);
+  }
+  public void checkClauseDependency(TTEntity report, Query query) {
+    if (query == null) return;
+    Node node = query.getIs();
+    if (node != null && node.getIri() != null) {
+      report.addObject(iri(IM.DEPENDENT_ON), iri(node.getIri()));
+    }
+    for (List<Query> subQueries : Arrays.asList(query.getRule(), query.getAnd(), query.getOr(), query.getWith(), query.getUnion(), query.getColumnGroup())) {
+      if (subQueries != null) {
+        for (Query subQuery : subQueries) {
+          checkClauseDependency(report, subQuery);
+        }
+      }
+    }
+    checkClauseDependency(report, query.getThen());
+  }
+
+
 }

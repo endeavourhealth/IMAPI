@@ -8,15 +8,16 @@ import org.endeavourhealth.imapi.dataaccess.EntityRepository;
 import org.endeavourhealth.imapi.dataaccess.OSQuery;
 import org.endeavourhealth.imapi.dataaccess.PathRepository;
 import org.endeavourhealth.imapi.dataaccess.QueryRepository;
+import org.endeavourhealth.imapi.errorhandling.DataMissingException;
 import org.endeavourhealth.imapi.model.customexceptions.OpenSearchException;
 import org.endeavourhealth.imapi.model.iml.Page;
 import org.endeavourhealth.imapi.model.imq.*;
 import org.endeavourhealth.imapi.model.requests.QueryRequest;
 import org.endeavourhealth.imapi.model.responses.SearchResponse;
 import org.endeavourhealth.imapi.model.search.SearchResultSummary;
+import org.endeavourhealth.imapi.utility.SharedObjectMapper;
 import org.endeavourhealth.imapi.vocabulary.GRAPH;
 import org.endeavourhealth.imapi.vocabulary.IM;
-import org.endeavourhealth.imapi.vocabulary.QUERY;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -50,7 +51,7 @@ public class SearchService {
    * @throws QueryException if query format is invalid
    */
   public JsonNode queryIM(QueryRequest queryRequest) throws QueryException, OpenSearchException {
-    ObjectNode result = new ObjectMapper().createObjectNode();
+    ObjectNode result = SharedObjectMapper.INSTANCE.createObjectNode();
     QueryRepository repo = new QueryRepository();
     repo.unpackQueryRequest(queryRequest, result);
     if (null != queryRequest.getTextSearch()) {
@@ -80,8 +81,8 @@ public class SearchService {
    * @return a list of SearchResultSummary
    * @throws QueryException if query format is invalid
    */
-  public SearchResponse queryIMSearch(QueryRequest queryRequest) throws OpenSearchException, QueryException {
-    ObjectMapper om = new ObjectMapper();
+  public SearchResponse queryIMSearch(QueryRequest queryRequest) throws OpenSearchException, QueryException, DataMissingException {
+    ObjectMapper om = SharedObjectMapper.INSTANCE;
 
     QueryRepository repo = new QueryRepository();
     repo.unpackQueryRequest(queryRequest, om.createObjectNode());
@@ -119,7 +120,7 @@ public class SearchService {
     return convertQueryIMResultsToSearchResultSummary(queryResults, queryResults);
   }
 
-  public SearchResponse convertQueryIMResultsToSearchResultSummary(JsonNode queryResults, JsonNode highestUsageResults) {
+  public SearchResponse convertQueryIMResultsToSearchResultSummary(JsonNode queryResults, JsonNode highestUsageResults) throws DataMissingException {
     SearchResponse searchResponse = new SearchResponse();
 
     if (queryResults.has(ENTITIES)) {
@@ -134,7 +135,7 @@ public class SearchService {
       }
     }
     if (queryResults.has("totalCount")) searchResponse.setTotalCount(queryResults.get("totalCount").asInt());
-    if (queryResults.has("count")) searchResponse.setCount(queryResults.get("count").asInt());
+    if (queryResults.has("size")) searchResponse.setSize(queryResults.get("size").asInt());
     if (queryResults.has("page")) searchResponse.setPage(queryResults.get("page").asInt());
     if (queryResults.has("term")) searchResponse.setTerm(queryResults.get("term").asText());
 
@@ -155,7 +156,7 @@ public class SearchService {
       QueryRequest request = new QueryRequest();
       request.setQuery(new Query().setIri(imQuery));
       request.setArgument(queryRequest.getArgument());
-      ObjectMapper om = new ObjectMapper();
+      ObjectMapper om = SharedObjectMapper.INSTANCE;
       repo.unpackQueryRequest(request, om.createObjectNode());
       JsonNode results = repo.queryIM(request, false);
       if (results != null & results.get(ENTITIES) != null) {
@@ -176,7 +177,7 @@ public class SearchService {
    * @param request holding the search term (multi or single word) + type/status/scheme filters
    * @return A set of Summaries of entity documents from the store
    */
-  public SearchResponse getEntitiesByTerm(QueryRequest request) throws OpenSearchException {
+  public SearchResponse getEntitiesByTerm(QueryRequest request) throws OpenSearchException, DataMissingException {
     return new OSQuery().OSQueryAsSearchResponse(request);
   }
 

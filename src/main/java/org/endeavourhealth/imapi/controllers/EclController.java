@@ -7,14 +7,17 @@ import lombok.extern.slf4j.Slf4j;
 import org.endeavourhealth.imapi.logic.service.ConceptService;
 import org.endeavourhealth.imapi.logic.service.EclService;
 import org.endeavourhealth.imapi.model.customexceptions.EclFormatException;
+import org.endeavourhealth.imapi.utility.MetricsHelper;
+import org.endeavourhealth.imapi.utility.MetricsTimer;
 import org.endeavourhealth.imapi.model.imq.ECLQueryRequest;
 import org.endeavourhealth.imapi.model.imq.QueryException;
 import org.endeavourhealth.imapi.model.responses.SearchResponse;
-import org.endeavourhealth.imapi.utility.MetricsHelper;
-import org.endeavourhealth.imapi.utility.MetricsTimer;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.context.annotation.RequestScope;
 
+import java.io.IOException;
 import java.util.Set;
 import java.util.UnknownFormatConversionException;
 
@@ -34,10 +37,10 @@ public class EclController {
     summary = "Retrieve ECL string",
     description = "Generates an ECL string from the provided IMQ Query object"
   )
-  public String getEcl(HttpServletRequest request, @RequestBody ECLQueryRequest inferred) throws QueryException {
+  public ResponseEntity<String> getEcl(HttpServletRequest request, @RequestBody ECLQueryRequest inferred) throws QueryException {
     try (MetricsTimer t = MetricsHelper.recordTime("ECL.Ecl.POST")) {
       log.debug("getEcl");
-      return eclService.getEcl(inferred);
+      return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(eclService.getEcl(inferred));
     }
   }
 
@@ -144,7 +147,6 @@ public class EclController {
   }
 
 
-
   @GetMapping(value = "/isValidPropertyForDomains")
   @Operation(summary = "Check if a property is valid for a list of domains")
   public Boolean isValidPropertyForDomains(
@@ -166,6 +168,16 @@ public class EclController {
     try (MetricsTimer t = MetricsHelper.recordTime("API.Entity.rangesForProperty.GET")) {
       log.debug("getRangesForProperty");
       return conceptService.getRangesForProperty(iri);
+    }
+  }
+  @GetMapping(value = "/protected/eclfrommembers")
+  @Operation(summary = "Compare two sets", description = "Compares two sets identified by the provided IRIs and returns their differences.")
+  public String getEclFromMembers(
+    HttpServletRequest request,
+    @RequestParam(name = "iri") String iri) throws IOException, QueryException {
+    try (MetricsTimer t = MetricsHelper.recordTime("API.Entity.EclFromMembers.GET")) {
+      log.debug("getEclFromMebers");
+      return eclService.getEclFromMembers(iri);
     }
   }
 }

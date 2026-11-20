@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.xml.bind.ValidationException;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.endeavourhealth.imapi.errorhandling.DataMissingException;
 import org.endeavourhealth.imapi.errorhandling.UserAuthorisationException;
 import org.endeavourhealth.imapi.errorhandling.UserNotFoundException;
 import org.endeavourhealth.imapi.filer.TTFilerException;
@@ -31,6 +32,7 @@ import org.endeavourhealth.imapi.model.search.DownloadByQueryOptions;
 import org.endeavourhealth.imapi.model.search.SearchResultSummary;
 import org.endeavourhealth.imapi.model.security.NamespacePermission;
 import org.endeavourhealth.imapi.model.security.Permission;
+import org.endeavourhealth.imapi.model.security.Action;
 import org.endeavourhealth.imapi.model.security.Resource;
 import org.endeavourhealth.imapi.model.security.User;
 import org.endeavourhealth.imapi.model.tripletree.TTBundle;
@@ -77,13 +79,10 @@ public class EntityController {
 
   @GetMapping(value = "/public/schemes")
   @Operation(summary = "Get schemes", description = "Fetches schemes and their prefixes available in the system")
-  public Map<String, Namespace> getNamespacesWithPrefixes(HttpServletRequest request) {
+  public List<Namespace> getNamespacesWithPrefixes(HttpServletRequest request) {
     try (MetricsTimer t = MetricsHelper.recordTime("API.Entity.Namespaces.GET")) {
       log.debug("getNamespacesWithPrefixes (getSchemes)");
-      List<Namespace> namespaces = entityService.getNamespaces();
-      Map<String, Namespace> result = new HashMap<>();
-      namespaces.forEach(namespace -> result.put(namespace.getIri(), namespace));
-      return result;
+      return entityService.getNamespaces();
     }
   }
 
@@ -121,7 +120,18 @@ public class EntityController {
     }
   }
 
+  @GetMapping(value = "/public/getmatchedsnomed")
+  @Operation(summary = "Get matched to iri", description = "fetches an iri matched to an iri")
+  public Set<String> getMatchedTo(HttpServletRequest request, @RequestParam(name = "iri") String iri) {
+    try (MetricsTimer t = MetricsHelper.recordTime("API.Entity.GetMatchedSnomed.GET")) {
+      log.debug("get matched snomed " + iri + "");
+      return entityService.getMatchedTo(iri,NAMESPACE.SNOMED);
+    }
+  }
+
   // ============================ PROTECTED ============================
+
+
 
   @GetMapping(value = "/protected/partial", produces = "application/json")
   @Operation(summary = "Get partial entity", description = "Fetches partial entity details using IRI and a set of predicates")
@@ -240,6 +250,27 @@ public class EntityController {
     }
   }
 
+  @GetMapping(value = "/protected/childrenPagedForTree")
+  @Operation(summary = "Get entity children with paging", description = "Fetches immediate children of the specified entity with pagination and total count")
+  public Pageable<EntityReferenceNode> getEntityChildrenPagedWithTotalCount(
+    HttpServletRequest request,
+    @RequestParam(name = "iri") String iri,
+    @RequestParam(name = "schemeIris", required = false) List<String> schemeIris,
+    @RequestParam(name = "page", required = false) Integer page,
+    @RequestParam(name = "size", required = false) Integer size,
+    @RequestParam(name = "typeFilter", required = false) List<String> typeFilter,
+    @RequestParam(name = "predicate") String predicate
+  ) {
+    try (MetricsTimer t = MetricsHelper.recordTime("API.Entity.ChildrenPagedForTree.GET")) {
+      log.debug("getEntityChildrenPagedWithTotalCount" + ((typeFilter != null) ? "entity types= " + typeFilter : ""));
+      if (page == null && size == null) {
+        page = 1;
+        size = 10;
+      }
+      return entityService.getEntityChildrenPagedForTree(iri, schemeIris, page, size, false, typeFilter, predicate);
+    }
+  }
+
   @GetMapping(value = "/protected/partialAndTotalCount")
   @Operation(summary = "Get partial and total count", description = "Fetches partial results and provides total count for the given entity and predicate")
   public Pageable<TTIriRef> getPartialAndTotalCount(
@@ -290,6 +321,15 @@ public class EntityController {
     }
   }
 
+  @GetMapping(value = "/protected/parentsForTree")
+  @Operation(summary = "Get entity parents", description = "Fetches immediate parent entities of the specified entity by IRI")
+  public List<EntityReferenceNode> getParentEntitiesForTree(HttpServletRequest request, @RequestParam(name = "iri") String iri, @RequestParam(name = "schemeIris", required = false) List<String> schemeIris, @RequestParam(name = "predicate", required = false) String predicate, @RequestParam(name = "page", required = false) Integer page, @RequestParam(name = "size", required = false) Integer size) {
+    try (MetricsTimer t = MetricsHelper.recordTime("API.Entity.ParentsForTree.GET")) {
+      log.debug("getParentEntitiesForTree");
+      return entityService.getParentEntitiesForTree(iri, schemeIris, predicate, page, size, false);
+    }
+  }
+
   @GetMapping(value = "/protected/usages")
   @Operation(summary = "Get entity usages", description = "Fetches usage details of the specified entity using IRI with pagination options")
   public List<TTEntity> entityUsages(HttpServletRequest request, @RequestParam(name = "iri") String iri, @RequestParam(name = "page", required = false) Integer page, @RequestParam(name = "size", required = false) Integer size) {
@@ -314,7 +354,7 @@ public class EntityController {
     try (MetricsTimer t = MetricsHelper.recordTime("API.Entity.entityExists.GET")) {
       log.debug("entityExists");
       NAMESPACE namespace = NAMESPACE.from(iri.substring(0, iri.indexOf("#") + 1));
-      securityService.requiresPermission(new Permission(Resource.ENTITY, List.of(), List.of(new NamespacePermission(namespace, true, false))), request);
+      securityService.requiresNamespace(namespace, true, false);
       return entityService.entityExists(iri);
     }
   }
@@ -330,7 +370,7 @@ public class EntityController {
 
   @GetMapping("/protected/summary")
   @Operation(summary = "Get entity summary", description = "Fetches a summary of the search results for the specified entity by IRI")
-  public SearchResultSummary getSummary(HttpServletRequest request, @RequestParam(name = "iri") String iri, @RequestParam(name = "graph", defaultValue = "http://endhealth.info/im#") String graph) {
+  public SearchResultSummary getSummary(HttpServletRequest request, @RequestParam(name = "iri") String iri, @RequestParam(name = "graph", defaultValue = "http://endhealth.info/im#") String graph) throws DataMissingException {
     try (MetricsTimer t = MetricsHelper.recordTime("API.Entity.Summary.GET")) {
       log.debug("getSummary");
       return entityService.getSummary(iri);
@@ -342,7 +382,7 @@ public class EntityController {
   public HttpEntity<Object> downloadSearchResults(
     HttpServletRequest request,
     @RequestBody DownloadByQueryOptions downloadByQueryOptions
-  ) throws OpenSearchException, DownloadException, QueryException {
+  ) throws OpenSearchException, DownloadException, QueryException, DataMissingException {
     try (MetricsTimer t = MetricsHelper.recordTime("API/Entity.DownloadSearchResults.POST")) {
       log.debug("downloadSearchResults");
       HttpHeaders headers = new HttpHeaders();
@@ -530,8 +570,9 @@ public class EntityController {
   public TTEntity createEntity(@RequestBody EditRequest editRequest, HttpServletRequest request) throws JsonProcessingException, UserAuthorisationException, TTFilerException, UserNotFoundException {
     try (MetricsTimer t = MetricsHelper.recordTime("API.Entity.Create.POST")) {
       log.debug("createEntity");
-      securityService.requiresPermission(new Permission(Resource.ENTITY, List.of(UserRole.CREATOR), List.of(new NamespacePermission(editRequest.getNamespace(), true, true))), request);
-      User user = securityService.getUser(request);
+      securityService.requiresNamespace(editRequest.getNamespace(), true, true);
+      securityService.requiresPermission(Resource.ENTITY, Action.CREATE);
+      User user = securityService.getUser();
       return filerService.createEntity(editRequest, user.getUsername());
     }
   }
@@ -541,8 +582,9 @@ public class EntityController {
   public TTEntity updateEntity(HttpServletRequest request, @RequestBody EditRequest editRequest) throws TTFilerException, IOException, UserAuthorisationException, UserNotFoundException {
     try (MetricsTimer t = MetricsHelper.recordTime("API.Entity.Update.POST")) {
       log.debug("updateEntity");
-      securityService.requiresPermission(new Permission(Resource.ENTITY, List.of(UserRole.EDITOR), List.of(new NamespacePermission(editRequest.getNamespace(), true, true))), request);
-      User user = securityService.getUser(request);
+      securityService.requiresNamespace(editRequest.getNamespace(), true, true);
+      securityService.requiresPermission(Resource.ENTITY, Action.UPDATE);
+      User user = securityService.getUser();
       return filerService.updateEntity(editRequest.getEntity(), user.getUsername());
     }
   }

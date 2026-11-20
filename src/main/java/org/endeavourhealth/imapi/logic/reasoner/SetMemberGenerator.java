@@ -8,6 +8,7 @@ import org.endeavourhealth.imapi.model.iml.Concept;
 import org.endeavourhealth.imapi.model.imq.Query;
 import org.endeavourhealth.imapi.model.imq.QueryException;
 import org.endeavourhealth.imapi.model.tripletree.TTBundle;
+import org.endeavourhealth.imapi.queryengine.SparqlOptimizer;
 import org.endeavourhealth.imapi.vocabulary.GRAPH;
 import org.endeavourhealth.imapi.vocabulary.IM;
 
@@ -42,12 +43,14 @@ public class SetMemberGenerator {
         log.info("Expanding members {}", iri);
         setRepo.updateMembers(iri, members, insertGraph);
       }
+      setRepo.updateMemberCount(iri);
     } else {
       log.info("Expanding from definition {}", iri);
       Query query = setDefinition.getEntity().get(iri(IM.DEFINITION)).asLiteral().objectValue(Query.class);
       new SparqlOptimizer().optimizeQuery(query);
       Set<Concept> members = setRepo.getMembersFromDefinition(query);
       setRepo.updateMembers(iri, members, insertGraph);
+      setRepo.updateMemberCount(iri);
     }
   }
 

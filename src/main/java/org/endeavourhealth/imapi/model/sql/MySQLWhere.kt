@@ -1,7 +1,8 @@
 package org.endeavourhealth.imapi.model.sql
 
-import org.endeavourhealth.imapi.errorhandling.SQLConversionException
 import org.endeavourhealth.imapi.model.imq.Node
+import org.endeavourhealth.imapi.errorhandling.SQLConversionException
+import org.endeavourhealth.imapi.model.imq.Entail
 
 interface MySQLWhere {
   val property: String?
@@ -85,21 +86,29 @@ class MySQLCompareWhere(
 ) : MySQLWhere {
   override val sqlTemplate: String
     get() {
-      val prop = if (table != null) "`${table}`.$property" else property
+      val prop = qualifyField(table?.let { "`$it`" }, property)
       val base =
         if (units != null) {
           when (units) {
-            "DAY", "MONTH", "YEAR" -> "TIMESTAMPDIFF($units, $prop, $right) $operator $value"
+            "DAY", "MONTH", "YEAR" -> {
+              val isNegative = value.trim().startsWith("-")
+              val magnitude = if (isNegative) value.trim().removePrefix("-") else value
+              val function = if (isNegative) "DATE_SUB" else "DATE_ADD"
+              "($prop) $operator $function($right, INTERVAL $magnitude $units)"
+            }
+
             else -> throw SQLConversionException("Unsupported unit $units")
           }
         } else if (qualifier != null) {
           when (qualifier) {
-            "QUARTER" -> "((YEAR($prop) - YEAR($right)) * 4 + (QUARTER($prop) - QUARTER($right))) $operator $value"
+            "QUARTER" -> "((CAST(YEAR($prop) AS SIGNED) - CAST(YEAR($right) AS SIGNED)) * 4 + (CAST(QUARTER($prop) AS SIGNED) - CAST(QUARTER($right) AS SIGNED))) $operator $value"
             "FISCAL_YEAR" -> "(YEAR(DATE_SUB($prop, INTERVAL 3 MONTH)) + 1) - (YEAR(DATE_SUB($right, INTERVAL 3 MONTH)) + 1) $operator $value"
-            "DAYS", "MONTHS", "YEARS" -> "$qualifier($prop) - $qualifier($right) $operator $value"
+            "DAY" -> "DATEDIFF($prop, $right) $operator $value"
+            "MONTH" -> "PERIOD_DIFF(DATE_FORMAT($prop, '%Y%m'), DATE_FORMAT($right, '%Y%m')) $operator $value"
+            "YEAR" -> "(CAST(YEAR($prop) AS SIGNED) - CAST(YEAR($right) AS SIGNED)) $operator $value"
             else -> "$prop - $right $operator $value"
           }
-        } else throw SQLConversionException("No units or qualifier provided")
+        } else "($prop) $operator $right"
       return if (not == true) "NOT ($base)" else base
     }
 }
@@ -117,15 +126,42 @@ class MySQLPropertyValueWhere(
 ) : MySQLWhere {
   override val sqlTemplate: String
     get() {
-      val prop = if (table != null) "`${table}`.$property" else property
+      val prop = qualifyField(table?.let { "`$it`" }, property)
       val base = if (qualifier != null) {
         when (qualifier) {
-          "QUARTER" -> "(YEAR($prop) $operator YEAR($value) AND (QUARTER($prop) $operator QUARTER($value))"
+          "QUARTER" -> "(YEAR($prop) $operator YEAR($value) AND (QUARTER($prop) $operator QUARTER($value)))"
           "FISCAL_YEAR" -> "(YEAR(DATE_SUB($prop, INTERVAL 3 MONTH)) + 1) $operator (YEAR(DATE_SUB($value, INTERVAL 3 MONTH)) + 1)"
           else -> "$qualifier($prop) $operator $qualifier($value)"
         }
-      } else return "$prop $operator $value"
+      } else {
+        "$prop $operator $value"
+      }
       return if (not == true) "NOT ($base)" else base
+    }
+}
+
+class MySQLNotExistsWhere(
+  val outerTable: String,
+  val outerKey: String,
+  val innerTable: String,
+  val innerKey: String,
+  val innerWheres: List<MySQLWhere> = emptyList(),
+  override val args: Map<String, String>? = null,
+  override var and: MutableList<MySQLWhere>? = null,
+  override var or: MutableList<MySQLWhere>? = null,
+  override val not: Boolean? = false,
+  override val table: String? = null,
+) : MySQLWhere {
+  override val property: String? = null
+  override val sqlTemplate: String
+    get() {
+      val outer = outerTable.trim('`')
+      val inner = innerTable.trim('`')
+      // a schema-qualified table is referenced as-is; a CTE alias is quoted
+      val innerRef = if (inner.contains('.')) inner else "`$inner`"
+      val conditions = listOf("`$outer`.$outerKey = $innerRef.$innerKey") + innerWheres.map { it.toSql() }
+      val body = "(\n    SELECT 1 FROM $innerRef\n    WHERE ${conditions.joinToString(" AND ")}\n  )"
+      return if (not == true) "EXISTS $body" else "NOT EXISTS $body"
     }
 }
 
@@ -139,9 +175,9 @@ class MySQLPropertyIsNullWhere(
 ) : MySQLWhere {
   override val sqlTemplate: String
     get() {
-      val prop = if (table != null) "`${table}`.$property" else property
+      val prop = qualifyField(table?.let { "`$it`" }, property)
       val base = "$prop IS NULL"
-      return if (not == true) "$property IS NOT NULL" else base
+      return if (not == true) "$prop IS NOT NULL" else base
     }
 }
 
@@ -160,7 +196,7 @@ class MySQLPropertyRangeWhere(
 ) : MySQLWhere {
   override val sqlTemplate: String
     get() {
-      val prop = if (table != null) "`${table}`.$property" else property
+      val prop = qualifyField(table?.let { "`$it`" }, property)
       val base = "$prop $operator $value AND $prop $operator2 $value2"
       return if (not == true) "NOT ($base)" else base
     }
@@ -175,6 +211,7 @@ class MySQLPropertyIsWhere(
   override var or: MutableList<MySQLWhere>? = null,
   override val not: Boolean? = false,
   override val table: String? = null,
+  val conceptTable: String = "concept_tct",
 ) : MySQLWhere {
 
   override val sqlTemplate: String
@@ -184,11 +221,12 @@ class MySQLPropertyIsWhere(
     val blocks = values.map { node ->
       val iri = node.iri
       val selfValue =
-        if (!node.isDescendantsOf && !node.isAncestorsOf && !node.isDescendantsOrSelfOf && !node.isMemberOf) 1 else 0
-      val base = if (selfValue == 0) "concept_tct.parent $operator '$iri'"
+        if (node.entails!= Entail.descendantsOf && node.entails!= Entail.ancestorsOf && node.entails!=Entail.descendantsOrSelfOf
+          && node.entails!=Entail.memberOf) 1 else 0
+      val base = if (selfValue == 0) "$conceptTable.parent $operator ${quoteSqlString(iri)}"
       else """(
-        concept_tct.parent $operator '$iri'
-        AND concept_tct.self = $selfValue
+        $conceptTable.parent $operator ${quoteSqlString(iri)}
+        AND $conceptTable.self = $selfValue
       )
       """.trimIndent()
       if (not == true) "NOT ($base)" else base

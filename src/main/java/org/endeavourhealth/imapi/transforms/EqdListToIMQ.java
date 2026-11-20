@@ -2,9 +2,10 @@ package org.endeavourhealth.imapi.transforms;
 
 
 import org.endeavourhealth.imapi.model.customexceptions.EQDException;
+import org.endeavourhealth.imapi.transforms.eqd.*;
 import org.endeavourhealth.imapi.model.imq.*;
 import org.endeavourhealth.imapi.model.tripletree.TTDocument;
-import org.endeavourhealth.imapi.transforms.eqd.*;
+import org.endeavourhealth.imapi.model.tripletree.TTIriRef;
 import org.endeavourhealth.imapi.vocabulary.IM;
 import org.endeavourhealth.imapi.vocabulary.NAMESPACE;
 
@@ -24,21 +25,22 @@ public class EqdListToIMQ {
     } else if (eqReport.getParent().getParentType() == VocPopulationParentType.ACTIVE) {
       id = NAMESPACE.IM + "Q_RegisteredGMS";
     } else throw new EQDException("parent population at definition level");
-    query.addIs(Node.iri(id)
-      .setIsCohort(true)
+    query.setIs(Node.iri(id)
+      .setCohort(true)
       .setName(resources.reportNames.get(id)));
+    resources.getQueryEntity().addObject(TTIriRef.iri(IM.DEPENDENT_ON), TTIriRef.iri(id));
     for (EQDOCListReport.ColumnGroups eqColGroups : eqReport.getListReport().getColumnGroups()) {
       EQDOCListColumnGroup eqColGroup = eqColGroups.getColumnGroup();
-      Match subQuery = new Match();
+      Query subQuery = new Query();
       subQuery.setIri(resources.getNamespace() + eqColGroup.getId());
       query.addColumnGroup(convertListGroup(eqColGroup));
     }
   }
 
 
-  private Match convertListGroup(EQDOCListColumnGroup eqColGroup) throws IOException, QueryException, EQDException {
+  private Query convertListGroup(EQDOCListColumnGroup eqColGroup) throws IOException, QueryException, EQDException {
     String eqTable = eqColGroup.getLogicalTableName();
-    Match subQuery;
+    Query subQuery;
     subQuery = convertColumns(eqColGroup, eqTable);
     subQuery.setName(eqColGroup.getDisplayName());
 
@@ -62,7 +64,7 @@ public class EqdListToIMQ {
         for (Path path : hasPaths.getPath()) {
           if (path.getIri() != null && path.getIri().equals(propertyPath[i])) {
             if (i == propertyPath.length - 3) {
-              return path.getNode();
+              return path.getAs();
             } else {
               nodeRef = getNodeRef(path, propertyPath, i + 2);
               if (nodeRef != null)
@@ -75,24 +77,24 @@ public class EqdListToIMQ {
       hasPaths.addPath(path);
       path.setIri(propertyPath[i]);
       path.setOptional(true);
-      path.setNode(resources.getAcronym(propertyPath[i + 1]));
+      path.setAs(resources.getAcronym(propertyPath[i + 1]));
       path.setTypeOf(new Node().setIri(propertyPath[i + 1]));
       if (i == propertyPath.length - 3)
-        return path.getNode();
+        return path.getAs();
       else return getNodeRef(path, propertyPath, i + 2);
     }
     return null;
   }
 
-  private Match convertColumns(EQDOCListColumnGroup eqColGroup, String eqTable) throws IOException, QueryException, EQDException {
+  private Query convertColumns(EQDOCListColumnGroup eqColGroup, String eqTable) throws IOException, QueryException, EQDException {
     resources.setRule(1);
     resources.setSubRule(1);
     String tablePath = resources.getIMPath(eqTable);
-    Match subQuery;
+    Query subQuery;
     if (eqColGroup.getCriteria() != null)
       subQuery = resources.convertCriteria(eqColGroup.getCriteria());
     else {
-      subQuery = new Match();
+      subQuery = new Query();
     }
     subQuery.setReturn(null);
     subQuery.setTypeOf(resources.getIMPath(eqTable));
@@ -114,8 +116,8 @@ public class EqdListToIMQ {
               .case_(c -> c
                 .when(w -> w
                   .setExists(true)
-                  .setThen("Y"))
-                .setElse("N")));
+                  .setThen(new Expression().setValue("Y")))
+                .setElse(new Expression().setValue("N"))));
         } else
           throw new QueryException("unmapped summary function : " + eqColGroup.getSummary().value());
       }
@@ -139,7 +141,7 @@ public class EqdListToIMQ {
     return subQuery;
   }
 
-  private void convertColumn(Match subQuery, String propertyIri, String as, String nodeRef) throws EQDException {
+  private void convertColumn(Query subQuery, String propertyIri, String as, String nodeRef) throws EQDException {
     Return property = new Return();
     subQuery.addReturn(property);
     ;
@@ -150,7 +152,7 @@ public class EqdListToIMQ {
       property.setAs(as);
   }
 
-  private void convertReturnConcatenate(Match subQuery, String eqTable, String tablePath, String eqPaths, String as) throws EQDException {
+  private void convertReturnConcatenate(Query subQuery, String eqTable, String tablePath, String eqPaths, String as) throws EQDException {
     FunctionClause function = new FunctionClause();
     Return property = new Return();
     subQuery.addReturn(property);

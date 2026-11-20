@@ -4,7 +4,6 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import com.fasterxml.jackson.annotation.JsonSetter;
-import lombok.Getter;
 import org.endeavourhealth.imapi.model.tripletree.TTIriRef;
 import org.endeavourhealth.imapi.vocabulary.VocabEnum;
 
@@ -14,7 +13,8 @@ import java.util.function.Consumer;
 
 @JsonPropertyOrder({"node", "variable", "iri", "name", "function", "as"})
 @JsonInclude(JsonInclude.Include.NON_DEFAULT)
-public class Return implements Returnable{
+public class Return implements Returnable {
+
   private String iri;
   private String nodeRef;
   private String name;
@@ -22,13 +22,55 @@ public class Return implements Returnable{
   private String pathRef;
   private boolean inverse;
   private FunctionClause function;
-  private String unit;
+  private TTIriRef units;
   private String as;
   private List<Return> returx;
   private TTIriRef dataType;
+  private TTIriRef semanticMap;
   @JsonProperty("case")
   private Case case_;
   private String description;
+  private String value;
+  private List<Expression> coalesce;
+
+  public List<Expression> getCoalesce() {
+    return coalesce;
+  }
+  public Return setCoalesce(List<Expression> coalesce) {
+    this.coalesce = coalesce;
+    return this;
+  }
+  public Return addCoalesce(Expression coalesce) {
+    if (this.coalesce == null) this.coalesce = new ArrayList<>();
+    this.coalesce.add(coalesce);
+    return this;
+  }
+  public Return coalesce(Consumer<Expression> builder) {
+    Expression coalesce = new Expression();
+    addCoalesce(coalesce);
+    builder.accept(coalesce);
+    return this;
+  }
+
+
+
+  public TTIriRef getSemanticMap() {
+    return semanticMap;
+  }
+
+  public Return setSemanticMap(TTIriRef semanticMap) {
+    this.semanticMap = semanticMap;
+    return this;
+  }
+
+  public String getValue() {
+    return value;
+  }
+
+  public Return setValue(String value) {
+    this.value = value;
+    return this;
+  }
 
   public String getPathRef() {
     return pathRef;
@@ -36,11 +78,6 @@ public class Return implements Returnable{
 
   public Return setPathRef(String pathRef) {
     this.pathRef = pathRef;
-    return this;
-  }
-
-  public Return setName(String name) {
-    this.name = name;
     return this;
   }
 
@@ -69,12 +106,6 @@ public class Return implements Returnable{
     return this;
   }
 
-  public Return setNodeRef(String nodeRef) {
-    this.nodeRef = nodeRef;
-    return this;
-  }
-
-
   @JsonProperty("return")
   public List<Return> getReturn() {
     return returx;
@@ -86,8 +117,7 @@ public class Return implements Returnable{
   }
 
   public Return addReturn(Return return_) {
-    if (this.returx == null)
-      this.returx = new ArrayList<>();
+    if (this.returx == null) this.returx = new ArrayList<>();
     this.returx.add(return_);
     return this;
   }
@@ -99,24 +129,8 @@ public class Return implements Returnable{
     return this;
   }
 
-  @JsonSetter
-  public Return setAs(String as) {
-    this.as = as;
-    return this;
-  }
-
   public Return as(String as) {
     this.as = as;
-    return this;
-  }
-
-  public Return setUnit(String unit) {
-    this.unit = unit;
-    return this;
-  }
-
-  public Return setFunction(FunctionClause function) {
-    this.function = function;
     return this;
   }
 
@@ -125,14 +139,8 @@ public class Return implements Returnable{
     return this;
   }
 
-  public Return setInverse(boolean inverse) {
-    this.inverse = inverse;
-    return this;
-  }
-
-
-  public Return setValue(String value) {
-    return this;
+  public String getIri() {
+    return iri;
   }
 
   public Return setIri(String iri) {
@@ -145,50 +153,76 @@ public class Return implements Returnable{
     return this;
   }
 
-  public Return setPropertyRef(String propertyRef) {
-    this.propertyRef = propertyRef;
-    return this;
-  }
-
-
-  public Return setDescription(String description) {
-    this.description = description;
-    return this;
-  }
-
-  public String getIri() {
-    return iri;
-  }
-
   public String getNodeRef() {
     return nodeRef;
+  }
+
+  public Return setNodeRef(String nodeRef) {
+    this.nodeRef = nodeRef;
+    return this;
   }
 
   public String getName() {
     return name;
   }
 
+  public Return setName(String name) {
+    this.name = name;
+    return this;
+  }
+
   public String getPropertyRef() {
     return propertyRef;
+  }
+
+  public Return setPropertyRef(String propertyRef) {
+    this.propertyRef = propertyRef;
+    return this;
   }
 
   public boolean isInverse() {
     return inverse;
   }
 
+  public Return setInverse(boolean inverse) {
+    this.inverse = inverse;
+    return this;
+  }
+
   public FunctionClause getFunction() {
     return function;
   }
 
-  public String getUnit() {
-    return unit;
+  public Return setFunction(FunctionClause function) {
+    this.function = function;
+    return this;
+  }
+
+  public TTIriRef getUnits() {
+    return this.units;
+  }
+
+  public Return setUnits(TTIriRef units) {
+    this.units = units;
+    return this;
   }
 
   public String getAs() {
     return as;
   }
 
+  @JsonSetter
+  public Return setAs(String as) {
+    this.as = as;
+    return this;
+  }
+
   public String getDescription() {
     return description;
+  }
+
+  public Return setDescription(String description) {
+    this.description = description;
+    return this;
   }
 }

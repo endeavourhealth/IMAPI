@@ -1,18 +1,19 @@
 package org.endeavourhealth.imapi.transforms;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import org.endeavourhealth.imapi.utility.SharedObjectMapper;
 import lombok.Getter;
 import lombok.Setter;
 import org.apache.commons.collections4.CollectionUtils;
 import org.endeavourhealth.imapi.logic.exporters.ImportMaps;
 import org.endeavourhealth.imapi.model.customexceptions.EQDException;
-import org.endeavourhealth.imapi.model.iml.Entity;
-import org.endeavourhealth.imapi.model.imq.*;
-import org.endeavourhealth.imapi.model.tripletree.*;
+import org.endeavourhealth.imapi.queryengine.LogicOptimizer;
 import org.endeavourhealth.imapi.transforms.eqd.*;
 import org.endeavourhealth.imapi.vocabulary.IM;
 import org.endeavourhealth.imapi.vocabulary.NAMESPACE;
+import org.endeavourhealth.imapi.model.iml.Entity;
+import org.endeavourhealth.imapi.model.imq.*;
+import org.endeavourhealth.imapi.model.tripletree.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,6 +30,8 @@ public class EqdResources {
   private final Map<String, Set<Node>> valueMap = new HashMap<>();
   private final Properties dataMap;
   private final Set<String> acronyms = new HashSet<>();
+
+
   @Getter
   Map<String, String> reportNames = new HashMap<>();
   @Setter
@@ -60,7 +63,6 @@ public class EqdResources {
   @Setter
   @Getter
   private int subRule = 0;
-  private Map<String, Match> nodeRefMap;
 
   public EqdResources(TTDocument document, Properties dataMap, NAMESPACE namespace) {
     this.dataMap = dataMap;
@@ -120,11 +122,11 @@ public class EqdResources {
     this.vocabMap.put(VocOrderDirection.ASC, "ASC");
   }
 
-  public Match convertGroup(EQDOCCriteriaGroup eqGroup) throws IOException, QueryException, EQDException {
+  public Query convertGroup(EQDOCCriteriaGroup eqGroup) throws IOException, QueryException, EQDException {
     this.incrementRule();
     if (eqGroup.getDefinition().getParentPopulationGuid() != null) {
       String parent = eqGroup.getDefinition().getParentPopulationGuid();
-      Match match = new Match();
+      Query query = new Query();
       if (EqdToIMQ.versionMap.containsKey(parent)) {
         parent = EqdToIMQ.versionMap.get(parent);
       }
@@ -132,22 +134,23 @@ public class EqdResources {
       if (EqdToIMQ.gmsPatients.contains(parent)) {
         finalParentId = NAMESPACE.IM + "Q_RegisteredGMS";
       }
-      match.addIs(Node.iri(finalParentId).setName(this.reportNames.get(parent)));
+      query.setIs(Node.iri(finalParentId).setName(this.reportNames.get(parent)));
       queryEntity.addObject(iri(IM.DEPENDENT_ON), iri(finalParentId));
-      return match;
+      return query;
     } else {
       List<EQDOCCriteria> groupCriteria = eqGroup.getDefinition().getCriteria();
-      Match groupMatch= this.getMatchFromGroup(groupCriteria, eqGroup.getDefinition().getMemberOperator());
+      Query groupQuery = this.getMatchFromGroup(groupCriteria, eqGroup.getDefinition().getMemberOperator());
       if (eqGroup.getDefinition().getMemberOperator() == VocMemberOperator.SCORE) {
-        EQDOCScore eqScore=eqGroup.getDefinition().getScore();
-        EQDOCRangeValue range=eqScore.getRangeValue();
-        Having having=new Having();
-        groupMatch.setHaving(having);
-        having.setAggregate(Aggregate.SUM);
-        if (range.getRangeFrom()!=null &&range.getRangeTo()==null){
-           having.setOperator((Operator) this.vocabMap.get(range.getRangeFrom().getOperator()));
-           having.setValue(range.getRangeFrom().getValue().getValue());
-        } else if (range.getRangeTo()!=null && range.getRangeFrom()==null){
+        EQDOCScore eqScore = eqGroup.getDefinition().getScore();
+        EQDOCRangeValue range = eqScore.getRangeValue();
+        Having having = new Having();
+        groupQuery.setHaving(having);
+        having.setFunction(Aggregate.SUM);
+        having.setIdentifier("score");
+        if (range.getRangeFrom() != null && range.getRangeTo() == null) {
+          having.setOperator((Operator) this.vocabMap.get(range.getRangeFrom().getOperator()));
+          having.setValue(range.getRangeFrom().getValue().getValue());
+        } else if (range.getRangeTo() != null && range.getRangeFrom() == null) {
           having.setOperator((Operator) this.vocabMap.get(range.getRangeTo().getOperator()));
           having.setValue(range.getRangeTo().getValue().getValue());
         } else {
@@ -156,38 +159,32 @@ public class EqdResources {
           having.getRange().setTo(new Value().setOperator((Operator) this.vocabMap.get(range.getRangeTo().getOperator())).setValue(range.getRangeTo().getValue().getValue()));
         }
       }
-      return groupMatch;
+      return groupQuery;
     }
   }
 
-  private Match getMatchFromGroup(List<EQDOCCriteria> groupCriteria, VocMemberOperator memberOp) throws QueryException, EQDException, IOException {
+  private Query getMatchFromGroup(List<EQDOCCriteria> groupCriteria, VocMemberOperator memberOp) throws QueryException, EQDException, IOException {
     this.subRule = 0;
-    if (groupCriteria.size() <= 1) {
-      EQDOCCriteria eqCriteria = groupCriteria.getFirst();
-      if (isNegatedCriteria(eqCriteria)) {
-        Match match = convertCriteria(eqCriteria);
-        match.setNotExists(true);
-        return match;
-      } else return convertCriteria(groupCriteria.getFirst());
-    } else {
-      Match boolMatch = new Match();
-      if (memberOp == null) {
-        memberOp = VocMemberOperator.OR;
-      }
-
-
-      for (EQDOCCriteria eqCriteria : groupCriteria) {
-        Match match = this.convertCriteria(eqCriteria);
-        if (isNegatedCriteria(eqCriteria)) {
-          match.setNotExists(true);
-        }
-        if (memberOp == VocMemberOperator.AND) {
-          boolMatch.addAnd(match);
-        } else boolMatch.addOr(match);
-      }
-
-      return boolMatch;
+    Query boolQuery = new Query();
+    if (memberOp == null) {
+      memberOp = VocMemberOperator.OR;
     }
+    for (EQDOCCriteria eqCriteria : groupCriteria) {
+      Query query = this.convertCriteria(eqCriteria);
+      if (isNegatedCriteria(eqCriteria)) {
+        query.setNotExists(true);
+      }
+      if (memberOp == VocMemberOperator.AND) {
+        boolQuery.addAnd(query);
+      } else boolQuery.addOr(query);
+    }
+    if (boolQuery.getAnd() != null && boolQuery.getAnd().size() == 1) {
+      return boolQuery.getAnd().getFirst();
+    }
+    if (boolQuery.getOr() != null && boolQuery.getOr().size() == 1) {
+      return boolQuery.getOr().getFirst();
+    }
+    return boolQuery;
   }
 
   private boolean isNegatedCriteria(EQDOCCriteria criteria) {
@@ -196,48 +193,58 @@ public class EqdResources {
     } else return false;
   }
 
-  public Match convertCriteria(EQDOCCriteria eqCriteria) throws IOException, QueryException, EQDException {
+  public Query convertCriteria(EQDOCCriteria eqCriteria) throws IOException, QueryException, EQDException {
     acronyms.clear();
-    String score=null;
-    if (eqCriteria.getScoreWeightage()!=null){
-      score=eqCriteria.getScoreWeightage().toString();
+    String score = null;
+    if (eqCriteria.getScoreWeightage() != null) {
+      score = eqCriteria.getScoreWeightage().toString();
     }
     if (eqCriteria.getPopulationCriterion() != null) {
       return this.getPopulationQuery(eqCriteria);
     } else {
       this.incrementSubRule();
       if (eqCriteria.getCriterion() != null) {
-        Match match = this.convertCriterion(eqCriteria.getCriterion());
-        if (eqCriteria.getCriterion().getDescription() != null)
-          match.setDescription(eqCriteria.getCriterion().getDescription());
-        if (score!=null)
-          match.setScore(score);
-        return match;
+        Query query = this.convertCriterion(eqCriteria.getCriterion(),null);
+        if (score != null) {
+          addScore(query, score);
+        }
+        return query;
       } else {
         Map<String, EQDOCCriterion> libraryItems = EqdToIMQ.getLibraryItems();
         String libraryId = eqCriteria.getLibraryItem().getLibraryItem();
         if (!libraryItems.containsKey(libraryId)) {
           System.err.println("Library item not found: " + libraryId);
-          Match libraryMatch = new Match();
-          libraryMatch.addIs(new Node().setIri(this.namespace + libraryId));
-          if (score!=null)
-            libraryMatch.setScore(score);
-          return libraryMatch;
+          Query libraryQuery = new Query();
+          libraryQuery.setIs(new Node().setIri(this.namespace + libraryId));
+          if (score != null)
+            addScore(libraryQuery, score);
+
+          return libraryQuery;
         } else {
           System.out.println("Library item found : " + libraryId);
-          Match match=this.convertCriterion(libraryItems.get(libraryId));
-          if (score!=null)
-            match.setScore(score);
-          return match;
+          Query query = this.convertCriterion(libraryItems.get(libraryId),null);
+          if (score != null)
+            addScore(query, score);
+          return query;
         }
       }
     }
   }
 
-  public Match getPopulationQuery(EQDOCCriteria eqCriteria) {
-    String score=null;
-    if (eqCriteria.getScoreWeightage()!=null){
-      score=eqCriteria.getScoreWeightage().toString();
+  private void addScore(Query query, String score) {
+    Case scoreCase = new Case();
+    When scoreWhen = new When();
+    scoreCase.addWhen(scoreWhen);
+    scoreWhen.setExists(true);
+    scoreWhen.setThen(new Expression().setValue(score));
+    query.addReturn(new Return().setCase(scoreCase).setAs("score"));
+    scoreCase.else_(e -> e.setValue("0"));
+  }
+
+  public Query getPopulationQuery(EQDOCCriteria eqCriteria) {
+    String score = null;
+    if (eqCriteria.getScoreWeightage() != null) {
+      score = eqCriteria.getScoreWeightage().toString();
     }
     EQDOCSearchIdentifier search = eqCriteria.getPopulationCriterion();
     String searchId = search.getReportGuid();
@@ -245,195 +252,322 @@ public class EqdResources {
     if (EqdToIMQ.versionMap.containsKey(searchId)) {
       searchId = EqdToIMQ.versionMap.get(searchId);
     }
-    Match match = new Match();
-    match.addIs(new Node().setIri(namespace + searchId)
-      .setIsCohort(true).setName((String) this.reportNames.get(search.getReportGuid())));
+    Query query = new Query();
+    query.setIs(new Node().setIri(namespace + searchId)
+      .setCohort(true).setName((String) this.reportNames.get(search.getReportGuid())));
     String finalSearchId = namespace + searchId;
     if (EqdToIMQ.gmsPatients.contains(searchId)) {
       finalSearchId = NAMESPACE.IM + "Q_RegisteredGMS";
     }
 
     queryEntity.addObject(iri(IM.DEPENDENT_ON), iri(finalSearchId));
-    if (score!=null){
-      match.setScore(score);
+    if (score != null) {
+      addScore(query, score);
     }
-    return match;
+    return query;
+  }
+
+  private EQDOCLinkedCriterion getLinkedCriterion(EQDOCCriterion parent,EQDOCLinkedCriterion parentLinkedCriterion) throws EQDException {
+    if (parentLinkedCriterion.getCriterion().getLinkedCriterion()==null){
+      return parentLinkedCriterion;
+    }
+    EQDOCCriterion childCriterion = parentLinkedCriterion.getCriterion();
+    if (childCriterion.getBaseCriteriaGroup().isEmpty()
+    &&childCriterion.getFilterAttribute().getColumnValue().isEmpty()){
+      if (childCriterion.getFilterAttribute().getRestriction() != null){
+        if (childCriterion.getFilterAttribute().getRestriction().getColumnOrder() != null){
+          if (childCriterion.getFilterAttribute().getRestriction().getColumnOrder().getRecordCount()>50){
+            return getLinkedCriterion(parent,childCriterion.getLinkedCriterion());
+          }
+          if (sameOrderBy(parent,childCriterion.getLinkedCriterion().getCriterion())&&
+          sameRelationship(parentLinkedCriterion,childCriterion.getLinkedCriterion())){
+            return getLinkedCriterion(parent,childCriterion.getLinkedCriterion());
+          }
+        }
+      }
+    }
+    return parentLinkedCriterion;
+  }
+  private boolean sameRelationship(EQDOCLinkedCriterion parentLinked, EQDOCLinkedCriterion childLinked){
+    try {
+      String parentRel = SharedObjectMapper.INSTANCE.writeValueAsString(parentLinked.getRelationship());
+      String childRel = SharedObjectMapper.INSTANCE.writeValueAsString(childLinked.getRelationship());
+      return parentRel.equals(childRel);
+    } catch (JsonProcessingException e) {
+      return false;
+    }
+
+    }
+  private boolean sameOrderBy(EQDOCCriterion criterion1, EQDOCCriterion criterion2){
+    if (criterion1.getFilterAttribute().getRestriction()==null) return false;
+    if (criterion2.getFilterAttribute().getRestriction()==null) return false;
+    EQDOCColumnOrder order1 = criterion1.getFilterAttribute().getRestriction().getColumnOrder();
+    EQDOCColumnOrder order2 = criterion2.getFilterAttribute().getRestriction().getColumnOrder();
+    if (order1.getRecordCount()!=order2.getRecordCount()) return false;
+    if (order1.getColumns().size()!=order2.getColumns().size()) return false;
+    if (order1.getColumns().getFirst().getDirection()!=order2.getColumns().getFirst().getDirection()) return false;
+    return true;
   }
 
 
-  private Match convertCriterion(EQDOCCriterion eqCriterion) throws IOException, QueryException, EQDException {
-    nodeRefMap = new HashMap<>();
-    Match baseMatch = null;
-    Match standardMatch = null;
-    Match testMatch = null;
-    Match linkedMatch = null;
-    Match lastMatch = null;
-    EQDOCFilterAttribute filter = eqCriterion.getFilterAttribute();
+  private Query convertCriterion(EQDOCCriterion eqCriterion,Query parentQuery) throws IOException, QueryException, EQDException {
+    Query baseQuery = null;
+    Query standardQuery = null;
+    Query linkedQuery = null;
+    Query testQuery = null;
+    Query lastQuery = null;
+    List<Query> steps = new ArrayList<>();
     boolean hasLinked = eqCriterion.getLinkedCriterion() != null;
-    boolean hasStandard = (!filter.getColumnValue().isEmpty() || filter.getRestriction() != null);
+    boolean hasRestriction= eqCriterion.getFilterAttribute().getRestriction() != null;
+    boolean hasTest= eqCriterion.getFilterAttribute().getRestriction() != null
+      && eqCriterion.getFilterAttribute().getRestriction().getTestAttribute() != null;
+    boolean hasColumns= !eqCriterion.getFilterAttribute().getColumnValue().isEmpty();
     if (!eqCriterion.getBaseCriteriaGroup().isEmpty()) {
-      baseMatch = this.convertBaseCriteriaGroups(eqCriterion);
-      lastMatch = baseMatch;
+      baseQuery = this.convertBaseCriteriaGroups(eqCriterion);
     }
-
-    if (hasStandard) {
-      standardMatch = this.convertStandardCriterion(eqCriterion, baseMatch);
-      if (baseMatch != null) {
-        if (standardMatch.getWhere() != null) {
-          if (baseMatch.getWhere() != null) {
-            throw new EQDException("Cannot combine base criteria and standard criteria where clauses");
-          }
-          baseMatch.setWhere(standardMatch.getWhere());
-        }
-        if (standardMatch.getOrderBy() != null) {
-          baseMatch.setOrderBy(standardMatch.getOrderBy());
-        }
-        standardMatch = null;
-      } else lastMatch = standardMatch;
-      if (eqCriterion.getFilterAttribute().getRestriction() != null && eqCriterion.getFilterAttribute().getRestriction().getTestAttribute() != null) {
-        testMatch = this.convertTestCriterion(eqCriterion);
-        lastMatch.setThen(testMatch.getWhere());
+    if (hasColumns) {
+      standardQuery = this.convertStandardCriterion(eqCriterion);
+      if (baseQuery!=null){
+        addReturns(standardQuery,baseQuery);
       }
     }
-    if (lastMatch == null) {
-      throw new EQDException("No matches found for criterion");
+    else if (hasRestriction){
+      if (baseQuery == null) {
+        if (parentQuery!=null){
+          setRestriction(eqCriterion, parentQuery);
+        }
+        else throw new EQDException("Restriction from nothing");
+      }
+      else setRestriction(eqCriterion, baseQuery);
     }
-
+    if (hasTest) {
+      testQuery = this.convertTestCriterion(eqCriterion);
+      if (standardQuery!=null) {
+        LogicOptimizer.setAs(standardQuery);
+        testQuery.setFrom(standardQuery.getAs());
+        standardQuery.setThen(testQuery);
+      }
+      else {
+        if (baseQuery == null) {
+          throw new EQDException("Restriction from nothing");
+        }
+        LogicOptimizer.setAs(baseQuery);
+        testQuery.setFrom(baseQuery.getAs());
+        baseQuery.setThen(testQuery);
+      }
+    }
+    if (testQuery!=null)
+      lastQuery= testQuery;
+    else if (standardQuery != null)
+      lastQuery= standardQuery;
+    else if (baseQuery!=null)
+      lastQuery= baseQuery;
+    else if (parentQuery!=null)
+      lastQuery= parentQuery;
+    if (lastQuery== null){
+      throw new EQDException("No query found for linked criterion");
+    }
     if (hasLinked) {
-      setKeepMatchNode(lastMatch, eqCriterion.getLinkedCriterion().getRelationship().getParentColumn());
-      linkedMatch = this.convertLinkedCriterion(eqCriterion, lastMatch);
-      setMatchNode(linkedMatch);
+      LogicOptimizer.setAs(lastQuery);
+      linkedQuery = this.convertLinkedCriterion(eqCriterion, lastQuery);
     }
-    List<Match> steps = new ArrayList<>();
+    if (baseQuery != null) {
+      steps.add(baseQuery);
+    }
 
-    if (baseMatch != null) {
-      steps.add(baseMatch);
+    if (standardQuery != null) {
+      steps.add(standardQuery);
     }
-    if (standardMatch != null) {
-      steps.add(standardMatch);
-    }
-    if (linkedMatch != null) {
-      steps.add(linkedMatch);
+    if (linkedQuery != null) {
+      steps.add(linkedQuery);
     }
 
     if (steps.size() > 1) {
-      Match outerMatch = new Match();
-      outerMatch.setAnd(steps);
-      return outerMatch;
-    } else return lastMatch;
+      Query outerQuery = new Query();
+      if (eqCriterion.isNegation()) {
+        outerQuery.setNotExists(true);
+      }
+      outerQuery.setAnd(steps);
+      return outerQuery;
+    } else {
+      if (eqCriterion.isNegation()) steps.getFirst().setNotExists(true);
+      return steps.getFirst();
+    }
   }
 
-  private Match convertBaseCriteriaGroups(EQDOCCriterion eqCriterion) throws QueryException, EQDException, IOException {
-    Match baseMatch;
+  private void addReturns(Query parentQuery,Query childQuery){
+    if (childQuery.getWhere()!=null){
+      addWhereReturns(parentQuery,childQuery.getWhere());
+    }
+  }
+
+  private void addWhereReturns(Query parentQuery, Where where) {
+    if (where.getIri()!=null){
+      addReturnIri(parentQuery,where.getIri());
+    }
+    for (List<Where> wheres:Arrays.asList(where.getAnd(),where.getOr())){
+      if (wheres!=null){
+        for (Where where1:wheres){
+          addWhereReturns(parentQuery,where1);
+        }
+      }
+    }
+  }
+
+
+  private void addReturnIri(Query parentQuery, String iri){
+    String as = iri.substring(iri.lastIndexOf("#")+1);
+
+    if (parentQuery.getReturn()!=null){
+      for (Return ret : parentQuery.getReturn()) {
+        if (ret.getIri().equals(iri)||ret.getAs().equals(as)) return;
+      }
+    }
+    if (parentQuery.getOr()!=null){
+      for (Query or : parentQuery.getOr()) {
+        addReturnIri(or,iri);
+      }
+      addReturnAs(parentQuery,as);
+    }
+    else if (parentQuery.getAnd()!=null){
+      for (Query and : parentQuery.getAnd()) {
+        addReturnIri(and,iri);
+      }
+      addReturnAs(parentQuery,as);
+    }
+    else parentQuery.addReturn(new Return().setIri(iri).setAs(as));
+  }
+  private void addReturnAs(Query query, String as){
+    if (query.getReturn()!=null){
+      for (Return ret : query.getReturn()) {
+        if (ret.getAs().equals(as)) return;
+      }
+    }
+    query.addReturn(new Return().setPropertyRef(as).setAs(as));
+  }
+
+  private Query convertBaseCriteriaGroups(EQDOCCriterion eqCriterion) throws QueryException, EQDException, IOException {
+    Query baseQuery;
     if (eqCriterion.getBaseCriteriaGroup().size() > 1) {
-      baseMatch = new Match();
+      baseQuery = new Query();
       for (EQDOCBaseCriteriaGroup baseGroup : eqCriterion.getBaseCriteriaGroup()) {
-        Match subQuery = this.convertBaseCriteriaGroup(baseGroup);
-        baseMatch.addOr(subQuery);
+        Query subQuery = this.convertBaseCriteriaGroup(baseGroup);
+        baseQuery.addOr(subQuery);
       }
     } else {
-      baseMatch = this.convertBaseCriteriaGroup(eqCriterion.getBaseCriteriaGroup().getFirst());
+      baseQuery = this.convertBaseCriteriaGroup(eqCriterion.getBaseCriteriaGroup().getFirst());
     }
-    return baseMatch;
+    return baseQuery;
   }
 
 
-  private Match convertBaseCriteriaGroup(EQDOCBaseCriteriaGroup baseGroup) throws QueryException, EQDException, IOException {
+  private Query convertBaseCriteriaGroup(EQDOCBaseCriteriaGroup baseGroup) throws QueryException, EQDException, IOException {
     return this.getMatchFromGroup(baseGroup.getDefinition().getCriteria(), baseGroup.getDefinition().getMemberOperator());
   }
 
 
-  private Match convertStandardCriterion(EQDOCCriterion eqCriterion, Match matchToTest) throws IOException, EQDException {
-    Match match = null;
+  private Query convertStandardCriterion(EQDOCCriterion eqCriterion) throws IOException, EQDException {
+    Query query=null;
     if (!eqCriterion.getFilterAttribute().getColumnValue().isEmpty()) {
-      match = this.convertColumns(eqCriterion.getTable(), eqCriterion.getId(), eqCriterion.getFilterAttribute().getColumnValue(), matchToTest);
+      query = this.convertColumns(eqCriterion.getTable(), eqCriterion.getFilterAttribute().getColumnValue());
     }
 
     if (eqCriterion.getFilterAttribute().getRestriction() != null) {
-      if (match == null) {
-        match = new Match();
-      }
-      this.setRestriction(eqCriterion, match);
+        if (query == null) {
+          query = new Query();
+        }
+        setRestriction(eqCriterion, query);
     }
 
-    if (match == null) {
-      throw new EQDException("No match found for standard criterion");
-    }
-    if (eqCriterion.isNegation()) match.setNotExists(true);
-    return match;
+    return query;
+
   }
 
-  private Match convertLinkedCriterion(EQDOCCriterion eqCriterion, Match parentMatch) throws IOException, QueryException, EQDException {
-    EQDOCCriterion eqLinkedCriterion = eqCriterion.getLinkedCriterion().getCriterion();
-    Match linkedMatch = this.convertCriterion(eqLinkedCriterion);
-    if (eqLinkedCriterion.getDescription() != null) linkedMatch.setDescription(eqLinkedCriterion.getDescription());
+  private Query getLinkedChildQuery(Query query) throws EQDException{
+    if (query.getAnd()==null)
+      return query;
+    if (query.getAnd()!=null) {
+      for (Query and : query.getAnd()) {
+        if (!and.isBase()) {
+            return getLinkedChildQuery(and);
+        }
+      }
+    }
+    throw new EQDException("Looking for linked child and not found");
+  }
+
+
+  private Query convertLinkedCriterion(EQDOCCriterion eqCriterion, Query parentQuery) throws IOException, QueryException, EQDException {
+    EQDOCLinkedCriterion criterionLinked = getLinkedCriterion(eqCriterion,eqCriterion.getLinkedCriterion());
+    EQDOCCriterion eqLinkedCriterion = criterionLinked.getCriterion();
+    Query childQuery = this.convertCriterion(eqLinkedCriterion,parentQuery);
     Where relationWhere = new Where();
-    addMatchWhere(linkedMatch, relationWhere);
+    addMatchWhere(childQuery, relationWhere);
     EQDOCRelationship eqRelationship = eqCriterion.getLinkedCriterion().getRelationship();
     String table = eqLinkedCriterion.getTable();
     String child = this.getIMPath(table + "/" + eqRelationship.getChildColumn());
     ValueSource relationLeft = new ValueSource();
-    relationLeft
-      .setNodeRef(getNodeRef(linkedMatch))
-      .setIri(child.substring(child.lastIndexOf(" ") + 1));
-
+    relationWhere.setIri(child.substring(child.lastIndexOf(" ") + 1));
     String parentProperty = eqRelationship.getParentColumn();
-    if (!parentProperty.contains("DATE") &&!parentProperty.contains("DOB"))
+    if (!parentProperty.contains("DATE") && !parentProperty.contains("DOB"))
       throw new EQDException("No match found for linked criterion parent property");
     ValueSource relationRight = new ValueSource();
-    if (eqRelationship.getParentColumn().contains("DATE")) {
+    String parentColumn = eqRelationship.getParentColumn();
+    if (parentColumn .equals("DATE")||parentColumn.equals("ISSUE_DATE")) {
       relationRight.setIri(NAMESPACE.IM + "effectiveDate");
-      injectPropertyReturn(parentMatch, relationRight.getIri());
-      relationRight.setNodeRef(getNode(parentMatch));
-      relationRight.setNodeRef(getKeepAs(parentMatch));
+      relationRight.setNodeRef(parentQuery.getAs());
       relationRight.setPropertyRef(relationRight.getIri().substring(relationRight.getIri().lastIndexOf("#") + 1));
     } else if (eqRelationship.getParentColumn().contains("VALUE")) {
       relationRight.setIri(NAMESPACE.IM + "value");
-      injectPropertyReturn(parentMatch, relationRight.getIri());
-      relationRight.setNodeRef(parentMatch.getNode());
+      relationRight.setNodeRef(parentQuery.getAs());
       relationRight.setPropertyRef(relationRight.getIri().substring(relationRight.getIri().lastIndexOf("#") + 1));
-      parentMatch.setNode(parentMatch.getNode() + "_VAL");
-      relationRight.setNodeRef(parentMatch.getNode());
+      parentQuery.setAs(parentQuery.getAs() + "_VAL");
+      relationRight.setNodeRef(parentQuery.getAs());
     } else if (eqRelationship.getParentColumn().contains("DOB")) {
-        Path linkedMatchPath = new Path();
-        linkedMatchPath.setIri(NAMESPACE.IM+"patient");
-        linkedMatchPath.setNode("patient");
-        linkedMatchPath.setTypeOf(NAMESPACE.IM+"Patient");
-        linkedMatch.addPath(linkedMatchPath);
-      relationRight.setNodeRef("patient").setIri(NAMESPACE.IM + "dateOfBirth");
-    } else throw new EQDException("No match found for linked criterion");
+      if (!parentQuery.getTypeOf().getIri().contains("Patient"))
+        throw new EQDException("testing a date of birth in parent that is not a patient");
+      relationRight.setIri(NAMESPACE.IM + "dateOfBirth");
+      relationRight.setNodeRef(parentQuery.getAs());
+      relationRight.setPropertyRef(relationRight.getIri().substring(relationRight.getIri().lastIndexOf("#") + 1));
+      LogicOptimizer.injectReturn(parentQuery, relationRight.getIri(), null);
+    }
+    else if (eqRelationship.getParentColumn().contains("GMS_DATE_OF_REGISTRATION")) {
+      relationRight.setIri(NAMESPACE.IM + "gmsDateOfRegistration");
+      relationRight.setNodeRef(parentQuery.getAs());
+      relationRight.setPropertyRef(relationRight.getIri().substring(relationRight.getIri().lastIndexOf("#") + 1));
+      LogicOptimizer.injectReturn(parentQuery, relationRight.getIri(), null);
+    }
+
+
+    else throw new EQDException("No map fpr parent column "+ eqRelationship.getParentColumn());
+
 
     if (eqRelationship.getRangeValue() != null) {
       EQDOCRangeValue eqRange = eqRelationship.getRangeValue();
       if (eqRange.getRangeFrom() != null && eqRange.getRangeTo() != null) {
         Range range = new Range();
         relationWhere.setRange(range);
+        buildCompare(relationWhere, relationLeft, relationRight);
         String fromValue = eqRange.getRangeFrom().getValue().getValue();
-
         TTIriRef fromUnits = setQualifierGetunits(relationWhere, eqRange.getRangeFrom().getValue().getUnit());
-        if (fromValue.equals("0")) {
-          fromValue = null;
-          fromUnits = null;
-        }
         Operator fromOperator = ((Operator) this.vocabMap.get(eqRange.getRangeFrom().getOperator()));
         Value from = new Value();
+        if (fromUnits != null)
+          from.setUnits(fromUnits);
         range.setFrom(from);
         from.setOperator(fromOperator);
         from.setValue(fromValue);
-        buildCompare(from, fromUnits, relationLeft, relationRight);
+        if (fromUnits != null)
+          from.setUnits(fromUnits);
         Value to = new Value();
         range.setTo(to);
         String toValue = eqRange.getRangeTo().getValue().getValue();
         Operator toOperator = ((Operator) this.vocabMap.get(eqRange.getRangeTo().getOperator()));
         TTIriRef toUnits = setQualifierGetunits(relationWhere, eqRange.getRangeTo().getValue().getUnit());
-        if (toValue.equals("0")) {
-          toValue = null;
-          toUnits = null;
-        }
-        from.setOperator(toOperator);
-        from.setValue(toValue);
-        buildCompare(to, toUnits, relationLeft, relationRight);
-
+        to.setOperator(toOperator);
+        to.setValue(toValue);
+        if (toUnits != null)
+          to.setUnits(toUnits);
       } else if (eqRelationship.getRangeValue().getRangeFrom() != null) {
         String fromValue = eqRange.getRangeFrom().getValue().getValue();
         TTIriRef fromUnits = setQualifierGetunits(relationWhere, eqRange.getRangeFrom().getValue().getUnit());
@@ -444,8 +578,9 @@ public class EqdResources {
         }
         relationWhere.setOperator(fromOperator);
         relationWhere.setValue(fromValue);
-        buildCompare(relationWhere, fromUnits, relationLeft, relationRight);
-
+        buildCompare(relationWhere,relationLeft, relationRight);
+        if (fromUnits!=null)
+          relationWhere.setUnits(fromUnits);
       } else {
         String toValue = eqRange.getRangeTo().getValue().getValue();
         Operator toOperator = ((Operator) this.vocabMap.get(eqRange.getRangeTo().getOperator()));
@@ -456,30 +591,19 @@ public class EqdResources {
         }
         relationWhere.setOperator(toOperator);
         relationWhere.setValue(toValue);
-        buildCompare(relationWhere, toUnits, relationLeft, relationRight);
+        buildCompare(relationWhere,relationLeft, relationRight);
+        if (toUnits!=null)
+          relationWhere.setUnits(toUnits);
       }
     } else {
-      relationWhere.setCompare(new Compare());
-      relationWhere.getCompare().setLeft(relationLeft);
-      relationWhere.getCompare().setRight(relationRight);
+      relationWhere.setCompare(relationRight);
       relationWhere.setOperator(Operator.eq);
     }
-    return linkedMatch;
+    return childQuery;
   }
 
-  private String getNode(Match parentMatch) throws EQDException {
-    if (parentMatch.getNode() != null) return parentMatch.getNode();
-    if (parentMatch.getAnd() != null) return getNode(parentMatch.getAnd().getLast());
-    if (parentMatch.getOr() != null) return getNode(parentMatch.getOr().getLast());
-    throw new EQDException("Could not find node for match");
-  }
 
-  private String getKeepAs(Match parentMatch) throws EQDException {
-    if (parentMatch.getNode() != null) return parentMatch.getNode();
-    if (parentMatch.getAnd() != null) return getKeepAs(parentMatch.getAnd().getLast());
-    if (parentMatch.getOr() != null) return getKeepAs(parentMatch.getOr().getLast());
-    throw new EQDException("Could not find keep as for match");
-  }
+
 
   private TTIriRef setQualifierGetunits(Where where, VocValueUnit eqUnits) throws EQDException {
     if (eqUnits == null) return null;
@@ -495,45 +619,37 @@ public class EqdResources {
     return units;
   }
 
-  private void buildCompare(Assignable assignable, TTIriRef units,
+  private void buildCompare(Where where,
                             ValueSource relationLeft,
                             ValueSource relationRight) {
 
-    assignable.setCompare(new Compare());
-    assignable.getCompare().setLeft(relationLeft);
-    assignable.getCompare().setRight(relationRight);
-    if (units != null)
-      assignable.getCompare().setUnits(units);
+    where.setCompare(relationRight);
+
+
   }
 
 
-  private Match convertColumns(String table, String eqId, List<EQDOCColumnValue> columns, Match matchToTest) throws EQDException, IOException {
+  private Query convertColumns(String table, List<EQDOCColumnValue> columns) throws EQDException, IOException {
+    Query query = new Query();
+    query.setTypeOf(this.getIMPath(table));
+    for (EQDOCColumnValue cv : columns) {
+      this.convertColumn(table, cv, query);
+    }
+    return query;
+  }
+
+  private Query convertTestColumns(String table, List<EQDOCColumnValue> columns) throws EQDException, IOException {
     int index = 0;
-    Match match = new Match();
-    match.setTypeOf(this.getIMPath(table));
+    Query query = new Query();
     for (EQDOCColumnValue cv : columns) {
       ++index;
-      this.convertColumn(table, eqId, cv, match);
-    }
-    if (match.getPath() != null) {
-      match.setTypeOf(new Node().setIri(match.getPath().getFirst().getTypeOf().getIri()));
+      this.convertColumn(table, cv, query);
     }
 
-    return match;
+    return query;
   }
 
-  private Match convertTestColumns(String table, String eqId, List<EQDOCColumnValue> columns) throws EQDException, IOException {
-    int index = 0;
-    Match match = new Match();
-    for (EQDOCColumnValue cv : columns) {
-      ++index;
-      this.convertColumn(table, eqId, cv, match);
-    }
-
-    return match;
-  }
-
-  private void convertColumn(String table, String eqId, EQDOCColumnValue cv, Match match) throws EQDException, IOException {
+  private void convertColumn(String table, EQDOCColumnValue cv, Query query) throws EQDException, IOException {
     String tablePath = this.getIMPath(table);
     String eqColumn = String.join("/", cv.getColumn());
     String eqURL = table + "/" + eqColumn;
@@ -542,100 +658,68 @@ public class EqdResources {
     String[] fullPath = (tablePath + " " + columnPath).trim().split(" ");
 
     Where where = new Where();
-    String variable = this.setMatchPath(match, fullPath);
+    String variable = this.setMatchPath(query, fullPath);
     if (variable != null) {
       where.setNodeRef(variable);
     }
 
-    addMatchWhere(match, where);
+    addMatchWhere(query, where);
     where.setIri(fullPath[fullPath.length - 1]);
     this.convertColumnValue(cv, where);
   }
 
-  private void setMatchNode(Match match) {
-    if (match.getAnd() != null) {
-      for (Match m : match.getAnd()) {
+  private void setMatchNode(Query query) {
+    if (query.getAnd() != null) {
+      for (Query m : query.getAnd()) {
         this.setMatchNode(m);
       }
-    } else if (match.getNode() == null) {
+    } else if (query.getAs() == null) {
       matchCounter++;
-      match.setNode("m_" + matchCounter);
-      nodeRefMap.put(match.getNode(), match);
+      query.setAs("m_" + matchCounter);
     }
   }
 
-  private void injectPropertyReturn(Match matchToTest, String iri) {
-    if (matchToTest.getWhere() != null) {
-      boolean alreadyIn = false;
-      if (matchToTest.getReturn() != null) {
-        for (Return returnProp : matchToTest.getReturn()) {
-          if (returnProp.getIri().equals(iri)) {
-            alreadyIn = true;
-            break;
-          }
-        }
-      }
-      if (!alreadyIn) {
-        matchToTest.return_(p -> p.setNodeRef(getNodeRef(matchToTest)).setIri(iri).setAs(iri.substring(iri.lastIndexOf("#") + 1)));
-      }
-    } else if (matchToTest.getOr() != null) {
-      for (Match m : matchToTest.getOr()) {
-        injectPropertyReturn(m, iri);
-      }
-    } else if (matchToTest.getAnd() != null) {
-      Match lastMatch = matchToTest.getAnd().getLast();
-      injectPropertyReturn(lastMatch, iri);
-    }
-  }
-
-
-  public String setMatchPath(Match match, String[] paths) {
-    if (paths.length == 2) {
+  public String setMatchPath(Query query, String[] paths) {
+    if (paths.length <= 2) {
       return null;
     } else {
       String path = paths[1];
       boolean inverse = path.startsWith("^");
       String pathIri = path.replaceFirst("^", "");
-      if (match.getPath() != null) {
-        Path pathMatch = match.getPath().getFirst();
+      if (query.getPath() != null) {
+        Path pathMatch = query.getPath().getFirst();
         if (pathMatch.getIri().equals(pathIri) && pathMatch.isInverse() == inverse) {
           if (paths.length == 4) {
-            return pathMatch.getNode();
+            return pathMatch.getAs();
           }
           return this.getPathFromPath(pathMatch, paths, 3);
         }
       }
 
       Path pathMatch = new Path();
-      match.addPath(pathMatch);
+      query.addPath(pathMatch);
       pathMatch.setIri(pathIri);
       pathMatch.setInverse(inverse);
-      pathMatch.setNode(getAcronym(paths[2]));
+      matchCounter++;
+      String node = getAcronym(paths[2]) + "_" + matchCounter;
+      pathMatch.setAs(node);
       ;
       pathMatch.setTypeOf((new Node()).setIri(paths[2]));
-      return paths.length == 4 ? pathMatch.getNode() : this.getPathFromPath(pathMatch, paths, 3);
+      return paths.length == 4 ? pathMatch.getAs() : this.getPathFromPath(pathMatch, paths, 3);
     }
   }
 
   public String getNodeRef(Path path) {
     if (path.getPath() != null) {
       Path pathMatch = path.getPath().getFirst();
-      if (pathMatch.getNode() != null && pathMatch.getPath() == null) {
-        return pathMatch.getNode();
+      if (pathMatch.getAs() != null && pathMatch.getPath() == null) {
+        return pathMatch.getAs();
       } else return getNodeRef(pathMatch);
     }
     return "";
   }
 
-  public String getNodeRef(Match match) {
-    if (match.getPath() != null) {
-      Path pathMatch = match.getPath().getFirst();
-      if (pathMatch.getNode() != null && pathMatch.getPath() == null) {
-        return pathMatch.getNode();
-      } else return getNodeRef(pathMatch);
-    }
-    return null;
-  }
+
 
 
   private String getPathFromPath(Path pathMatch, String[] paths, int offset) {
@@ -646,7 +730,7 @@ public class EqdResources {
       Path subPathMatch = pathMatch.getPath().getFirst();
       if (subPathMatch.getIri().equals(pathIri) && subPathMatch.isInverse() == inverse) {
         if (paths.length == offset + 3) {
-          return subPathMatch.getNode();
+          return subPathMatch.getAs();
         }
         return this.getPathFromPath(subPathMatch, paths, offset + 2);
       }
@@ -656,9 +740,11 @@ public class EqdResources {
     pathMatch.addPath(subPathMatch);
     subPathMatch.setIri(pathIri);
     subPathMatch.setInverse(inverse);
-    subPathMatch.setNode(getAcronym(paths[offset + 1]));
+    matchCounter++;
+    String node = getAcronym(paths[offset + 1]) + "_" + matchCounter;
+    subPathMatch.setAs(node);
     subPathMatch.setTypeOf((new Node()).setIri(paths[offset + 1]));
-    return paths.length == offset + 3 ? pathMatch.getNode() : this.getPathFromPath(pathMatch, paths, offset + 2);
+    return paths.length == offset + 3 ? pathMatch.getAs() : this.getPathFromPath(pathMatch, paths, offset + 2);
   }
 
   private void convertColumnValue(EQDOCColumnValue cv, Where pv) throws IOException, EQDException {
@@ -671,7 +757,7 @@ public class EqdResources {
         ++this.setCounter;
         String vsetName = "Unnamed library set " + this.setCounter;
         Node iri = (new Node()).setIri(this.namespace + vset).setName(vsetName);
-        iri.setMemberOf(true);
+        iri.setEntails(Entail.memberOf);
         pv.addIs(iri);
         if (!in)
           pv.setNot(true);
@@ -739,12 +825,12 @@ public class EqdResources {
     return iri.startsWith("http") ? iri : NAMESPACE.IM + iri;
   }
 
-  private Match convertTestCriterion(EQDOCCriterion eqCriterion) throws EQDException, IOException {
+  private Query convertTestCriterion(EQDOCCriterion eqCriterion) throws EQDException, IOException {
     EQDOCTestAttribute testAtt = eqCriterion.getFilterAttribute().getRestriction().getTestAttribute();
-    return this.convertTestColumns(eqCriterion.getTable(), null, testAtt.getColumnValue());
+    return this.convertTestColumns(eqCriterion.getTable(), testAtt.getColumnValue());
   }
 
-  private void setRestriction(EQDOCCriterion eqCriterion, Match restricted) throws EQDException {
+  private void setRestriction(EQDOCCriterion eqCriterion, Query restricted) throws EQDException {
     EQDOCFilterRestriction restrict = eqCriterion.getFilterAttribute().getRestriction();
     Order direction;
     if ((restrict.getColumnOrder().getColumns().getFirst()).getDirection() == VocOrderDirection.ASC) {
@@ -755,68 +841,28 @@ public class EqdResources {
     String linkColumn = eqCriterion.getFilterAttribute().getRestriction().getColumnOrder().getColumns().getFirst().getColumn().getFirst();
     String table = eqCriterion.getTable();
     String orderBy = this.getIMPath(table + "/" + linkColumn);
-    if (restrict.getColumnOrder().getRecordCount() != 1000) {
-      String nodeRef = getNodeRef(restricted);
-      restricted.orderBy((o) -> o
+    restricted.orderBy((o) -> o
+      .addPartition(new IriLD().setIri(NAMESPACE.IM + "patient").setName("patient"))
         .addProperty(new OrderDirection()
-          .setNodeRef(nodeRef)
           .setIri(orderBy)
           .setDirection(direction))
         .setLimit(restrict.getColumnOrder().getRecordCount()));
-    }
+
   }
 
-  private void addMatchWhere(Match match, Where where) {
-    if (match.getWhere() == null) {
-      match.setWhere(where);
-    } else if (match.getWhere().getIri() != null) {
+  private void addMatchWhere(Query query, Where where) {
+    if (query.getWhere() == null) {
+      query.setWhere(where);
+    } else if (query.getWhere().getAnd()!=null){
+      query.getWhere().addAnd(where);
+    }else {
       Where boolWhere = new Where();
-      boolWhere.addAnd(match.getWhere());
-      match.setWhere(boolWhere);
+      boolWhere.addAnd(query.getWhere());
+      query.setWhere(boolWhere);
       boolWhere.addAnd(where);
-    } else {
-      match.getWhere().addAnd(where);
     }
   }
 
-
-  private String getRelationship(EQDOCRelationship eqRelationship) throws QueryException {
-    StringBuilder relationship = new StringBuilder();
-    relationship.append(eqRelationship.getParentColumnDisplayName());
-    if (eqRelationship.getRangeValue() == null) {
-      relationship.append(" on same date as");
-    } else {
-      EQDOCRangeFrom eqFrom = eqRelationship.getRangeValue().getRangeFrom();
-      if (eqFrom != null) {
-        VocRangeFromOperator op = eqFrom.getOperator();
-        switch (op) {
-          case GT:
-            relationship.append(" after");
-            break;
-          case GTEQ:
-            relationship.append(" on or after");
-            break;
-          default:
-            throw new QueryException("Unknown operator " + op);
-        }
-      } else {
-        EQDOCRangeTo eqTo = eqRelationship.getRangeValue().getRangeTo();
-        if (eqTo != null) {
-          VocRangeToOperator op = eqTo.getOperator();
-          switch (op) {
-            case LT:
-              relationship.append(" before");
-              break;
-            case LTEQ:
-              relationship.append(" on or before");
-              break;
-          }
-        }
-
-      }
-    }
-    return relationship.toString();
-  }
 
   private void setSingleValue(EQDOCColumnValue cv, Where pv, boolean in) throws IOException, EQDException {
     EQDOCSingleValue sv = cv.getSingleValue();
@@ -837,22 +883,15 @@ public class EqdResources {
         pv.setOperator(Operator.eq);
         pv.setValue("-1");
         pv.setValueTerm("last");
-        pv.setCompare(new Compare());
+        pv.setCompare(new ValueSource());
         pv.setQualifier(qualifier);
-        Compare diff = pv.getCompare();
-        diff.setLeft(new ValueSource()
-          .setIri(pv.getIri()).setNodeRef(pv.getNodeRef()));
-        diff.setRight(new ValueSource()
-          .setParameter("$searchDate"));
+        ValueSource diff = pv.getCompare();
+        diff.setParameter("$searchDate");
       } else if (value.equalsIgnoreCase("this")) {
         pv.setOperator(Operator.eq);
-        pv.setCompare(new Compare());
+        pv.setCompare(new ValueSource());
         pv.setQualifier(qualifier);
-        Compare comp = pv.getCompare();
-        comp.setLeft(new ValueSource()
-          .setIri(pv.getIri()).setNodeRef(pv.getNodeRef()));
-        comp.setRight(new ValueSource()
-          .setParameter("$searchDate"));
+        pv.getCompare().setParameter("$searchDate");
         pv.setValueTerm("this");
       }
     } else if (value.matches("^-?(\\d+(\\.\\d*)?|\\.\\d+)$")) {
@@ -863,9 +902,12 @@ public class EqdResources {
       String key = this.sourceContext + "/EMISINTERNAL/" + value;
       Object mapValue = this.dataMap.get(key);
       if (mapValue != null) {
-        pv.addIs(new Node().setIri(getValueIriResult(mapValue).stream().findFirst().get().getIri()));
-        if (!in) pv.setNot(true);
-      } else throw new EQDException("variable " + value + "with " + relative + " not supported");
+        Optional<Node> node=getValueIriResult(mapValue).stream().findFirst();
+        if (node.isPresent()) {
+          pv.addIs(new Node().setIri(node.get().getIri()));
+          if (!in) pv.setNot(true);
+        }
+      } else throw new EQDException("variable " + value + "and " + relative + " not supported");
     }
   }
 
@@ -873,18 +915,18 @@ public class EqdResources {
   private void setRangeValue(EQDOCRangeValue rv, Where pv) throws EQDException {
     EQDOCRangeFrom rFrom = rv.getRangeFrom();
     EQDOCRangeTo rTo = rv.getRangeTo();
-    String leftProperty= pv.getIri();
+    String leftProperty = pv.getIri();
     if (rFrom != null && rTo != null) {
       this.setRangeCompare(pv, rFrom, rTo, rv.getRelativeTo());
     } else if (rFrom != null) {
-      this.setCompareFrom(pv, rFrom, rv.getRelativeTo(),leftProperty);
+      this.setCompareFrom(pv, rFrom, rv.getRelativeTo(), leftProperty);
     } else if (rTo != null) {
-      this.setCompareTo(pv, rTo, rv.getRelativeTo(),leftProperty);
+      this.setCompareTo(pv, rTo, rv.getRelativeTo(), leftProperty);
     }
   }
 
 
-  private void setCompareFrom(Where where, EQDOCRangeFrom rFrom, String relativeTo,String leftProperty) throws EQDException {
+  private void setCompareFrom(Where where, EQDOCRangeFrom rFrom, String relativeTo, String leftProperty) throws EQDException {
     Operator comp;
     if (rFrom.getOperator() != null) {
       comp = (Operator) this.vocabMap.get(rFrom.getOperator());
@@ -903,11 +945,11 @@ public class EqdResources {
         relation = VocRelation.RELATIVE;
       }
     }
-    this.setCompare(where, where, comp, value, units, relation, relativeTo,leftProperty);
+    this.setCompare(where, where, comp, value, units, relation, relativeTo, leftProperty);
   }
 
 
-  private void setCompareTo(Where pv, EQDOCRangeTo rTo, String relativeTo,String leftProperty) throws EQDException {
+  private void setCompareTo(Where pv, EQDOCRangeTo rTo, String relativeTo, String leftProperty) throws EQDException {
     Operator comp;
     if (rTo.getOperator() != null) {
       comp = (Operator) this.vocabMap.get(rTo.getOperator());
@@ -928,21 +970,23 @@ public class EqdResources {
       }
     }
 
-    this.setCompare(pv, pv, comp, value, units, relation, relativeTo,leftProperty);
+    this.setCompare(pv, pv, comp, value, units, relation, relativeTo, leftProperty);
   }
 
 
-  private void setCompare(Where where, Assignable assignable, Operator comp, String value, TTIriRef units, VocRelation relation, String relativeTo,String leftProperty) throws EQDException {
-
-    String property = leftProperty;
+  private void setCompare(Where where, Assignable assignable, Operator comp, String value,
+                          TTIriRef units, VocRelation relation,
+                          String relativeTo, String leftProperty) throws EQDException {
 
     if (relativeTo != null) {
       relation = VocRelation.RELATIVE;
       if (relativeTo.equals("BASELINE")) {
-        relativeTo = "$achievementDate";
+        relativeTo = "$searchDate";
       } else throw new EQDException("relative to " + relativeTo + " not supported");
     }
-
+    if (units != null) {
+      assignable.setUnits(units);
+    }
     assignable.setOperator(comp);
     if (value != null && value.equals("This")) {
       assignable.setOperator(Operator.eq);
@@ -959,21 +1003,17 @@ public class EqdResources {
     }
     if (relation == VocRelation.RELATIVE) {
       if (leftProperty.contains("age")) {
-        assignable.setUnits(units);
         return;
       }
       if (relativeTo == null) {
         relativeTo = "$searchDate";
       }
       ValueSource relationLeft = new ValueSource();
-      where.setIri((String) null);
-      where.setName(null);
-      relationLeft.setIri(property).setNodeRef(where.getNodeRef());
+      relationLeft.setIri(leftProperty).setNodeRef(where.getNodeRef());
       ValueSource relationRight = new ValueSource();
       relationRight.setParameter(relativeTo);
-      if (assignable.getValue() == null) {
-        buildCompare(assignable, units, relationLeft, relationRight);
-      } else buildCompare(assignable, units, relationLeft, relationRight);
+      buildCompare(where,relationLeft, relationRight);
+
     }
 
   }
@@ -1015,7 +1055,7 @@ public class EqdResources {
     where.setRange(range);
     Value fromValue = new Value();
     range.setFrom(fromValue);
-    String leftProperty= where.getIri();
+    String leftProperty = where.getIri();
     Operator comp;
     if (rFrom.getOperator() != null) {
       comp = (Operator) this.vocabMap.get(rFrom.getOperator());
@@ -1035,7 +1075,7 @@ public class EqdResources {
     }
 
 
-    this.setCompare(where, fromValue, comp, value, units, relation, relativeTo,leftProperty);
+    this.setCompare(where, fromValue, comp, value, units, relation, relativeTo, leftProperty);
     Value toValue = new Value();
     range.setTo(toValue);
     if (rFrom.getOperator() != null) {
@@ -1055,7 +1095,7 @@ public class EqdResources {
       relation = VocRelation.RELATIVE;
     }
 
-    this.setCompare(where, toValue, comp, value, units, relation, relativeTo,leftProperty);
+    this.setCompare(where, toValue, comp, value, units, relation, relativeTo, leftProperty);
   }
 
   private List<Node> getExceptionSet(EQDOCException set) throws IOException {
@@ -1088,7 +1128,7 @@ public class EqdResources {
 
     TTIriRef cluster = this.getClusterSet(vs);
     if (cluster != null) {
-      pv.addIs((new Node()).setIri(cluster.getIri()).setName(cluster.getName()).setMemberOf(true));
+      pv.addIs((new Node()).setIri(cluster.getIri()).setName(cluster.getName()).setEntails(Entail.memberOf));
       if (!in) pv.setNot(true);
     } else {
       Set<Node> setContent = new HashSet<>();
@@ -1096,7 +1136,7 @@ public class EqdResources {
         Set<Node> setMembers = this.processEQDOCValueSetValue(scheme, ev);
         if (!setMembers.isEmpty()) {
           for (Node memberOrConcept : setMembers) {
-            if (memberOrConcept.isMemberOf()) {
+            if (memberOrConcept.getEntails()==Entail.memberOf) {
               String setIri = memberOrConcept.getIri();
               TTEntity usedIn = EqdToIMQ.setIriToEntity.get(setIri);
               if (usedIn == null) {
@@ -1116,7 +1156,7 @@ public class EqdResources {
       if (scheme == VocCodeSystemEx.SCT_CONST) {
         Query eclQuery = this.convertToEcl(scheme, setContent);
         TTEntity valueSet = this.createValueSet(vs, eclQuery, setContent);
-        pv.addIs((new Node()).setIri(valueSet.getIri()).setName(valueSet.getName()).setMemberOf(true));
+        pv.addIs((new Node()).setIri(valueSet.getIri()).setName(valueSet.getName()).setEntails(Entail.memberOf));
         if (!in) pv.setNot(true);
         pv.setValueLabel(valueSet.getName() + (eclQuery.notExists() ? " (+exclusions)" : ""));
       } else {
@@ -1145,14 +1185,14 @@ public class EqdResources {
               name = this.getShortName(node.getName(), previous);
               previous = name;
             }
-            if (node.isMemberOf()) {
+            if (node.getEntails() == Entail.memberOf) {
               pv.addIs(node);
               if (!in) pv.setNot(true);
             }
           }
-          Set<Node> conceptContent = setContent.stream().filter(c -> !c.isMemberOf()).collect(Collectors.toSet());
+          Set<Node> conceptContent = setContent.stream().filter(c -> c.getEntails()!=Entail.memberOf).collect(Collectors.toSet());
           TTEntity valueSet = this.createValueSet(vs, conceptContent);
-          pv.addIs((new Node()).setIri(valueSet.getIri()).setName(valueSet.getName()).setMemberOf(true));
+          pv.addIs((new Node()).setIri(valueSet.getIri()).setName(valueSet.getName()).setEntails(Entail.memberOf));
           if (!in) pv.setNot(true);
           pv.setValueLabel(valueSet.getName() + exclusions);
         }
@@ -1186,6 +1226,7 @@ public class EqdResources {
       for (Node node : setContent) {
         if (node.isExclude()) {
           notWhere.addIs(node);
+          node.setExclude(false);
         } else where.addIs(node);
         if (node.getName() != null && name == null) {
           name = this.getShortName(node.getName(), null);
@@ -1193,13 +1234,13 @@ public class EqdResources {
       }
 
       if (notWhere.getIs() != null) {
-        Match inMatch = new Match();
-        addMatchWhere(inMatch, where);
-        eclQuery.addAnd(inMatch);
-        Match notMatch = new Match();
-        notMatch.setNotExists(true);
-        eclQuery.addAnd(notMatch);
-        addMatchWhere(notMatch, notWhere);
+        Query inQuery = new Query();
+        addMatchWhere(inQuery, where);
+        eclQuery.addAnd(inQuery);
+        Query notQuery = new Query();
+        notQuery.setNotExists(true);
+        eclQuery.addAnd(notQuery);
+        addMatchWhere(notQuery, notWhere);
       } else {
         addMatchWhere(eclQuery, where);
       }
@@ -1218,7 +1259,7 @@ public class EqdResources {
     } else {
       if (ev.isIncludeChildren()) {
         for (Node node : concepts) {
-          node.setDescendantsOrSelfOf(true);
+          node.setEntails(Entail.descendantsOrSelfOf);
         }
       }
 
@@ -1229,7 +1270,7 @@ public class EqdResources {
             if (exceptionValue != null) {
               for (Node node : exceptionValue) {
                 if (val.isIncludeChildren()) {
-                  node.setDescendantsOrSelfOf(true);
+                  node.setEntails(Entail.descendantsOrSelfOf);
                 }
 
                 node.setExclude(true);
@@ -1328,7 +1369,7 @@ public class EqdResources {
         n.setIri(e.getIri());
         n.setName(e.getName());
         if (Set.of(iri(IM.CONCEPT_SET), iri(IM.VALUESET)).stream().anyMatch(e.getType()::contains))
-          n.setMemberOf(true);
+          n.setEntails(Entail.memberOf);
         return n;
       })
       .collect(Collectors.toSet());
@@ -1376,7 +1417,9 @@ public class EqdResources {
 
   private void updateSetName(TTEntity setName, String thisName) {
     String currentName = setName.getName();
-    if (!currentName.contains(thisName)) {
+    if (currentName == null) {
+      setName.setName(thisName);
+    } else if (thisName != null && !currentName.contains(thisName)) {
       setName.setName(currentName.split(" (set)")[0] + " ... (set");
     }
 
@@ -1385,7 +1428,7 @@ public class EqdResources {
   private TTEntity createValueSet(EQDOCValueSet vs, Query definition, Set<Node> setContent) throws JsonProcessingException {
     String description = vs.getDescription();
     String name = description == null ? this.getNameFromSet(vs, setContent) : description;
-    String entailedMembers = (new ObjectMapper()).writeValueAsString(definition);
+    String entailedMembers = SharedObjectMapper.INSTANCE.writeValueAsString(definition);
     TTEntity duplicate = EqdToIMQ.definitionToEntity.get(entailedMembers);
     if (duplicate != null) {
       this.addUsedIn(duplicate);
@@ -1406,15 +1449,11 @@ public class EqdResources {
   private TTEntity createValueSet(EQDOCValueSet vs, Set<Node> setContent) throws JsonProcessingException {
     String description = vs.getDescription();
     String name = description == null ? this.getNameFromSet(vs, setContent) : description;
-    String entailedMembers = (new ObjectMapper()).writeValueAsString(setContent);
+    String entailedMembers = SharedObjectMapper.INSTANCE.writeValueAsString(setContent);
     TTEntity duplicate = EqdToIMQ.definitionToEntity.get(entailedMembers);
     if (duplicate != null) {
       this.addUsedIn(duplicate);
-      if (this.columnGroup != null) {
-        this.updateSetName(duplicate, name);
-      } else {
-        this.updateSetName(duplicate, name);
-      }
+      this.updateSetName(duplicate, name);
 
       return duplicate;
     } else {
@@ -1438,18 +1477,11 @@ public class EqdResources {
         if (node.isExclude()) {
           instance.set(iri(IM.EXCLUDE), TTLiteral.literal(true));
         }
+        if (node.getEntails() != null){
+          instance.set(iri(IM.ENTAILMENT), TTLiteral.literal(node.getEntails().getValue()));
+      }
 
-        if (node.isAncestorsOf()) {
-          instance.set(iri(IM.ENTAILMENT), iri(IM.ANCESTORS_OF));
-        }
 
-        if (node.isDescendantsOf()) {
-          instance.set(iri(IM.ENTAILMENT), iri(IM.DESCENDANTS_OF));
-        }
-
-        if (node.isDescendantsOrSelfOf()) {
-          instance.set(iri(IM.ENTAILMENT), iri(IM.DESCENDANTS_OR_SELF_OF));
-        }
       }
 
       EqdToIMQ.definitionToEntity.put(entailedMembers, valueSet);
@@ -1504,12 +1536,21 @@ public class EqdResources {
     return acronym;
   }
 
-  private String createKeepAs(Match match) {
+  private String createKeepAs(Query query) {
     StringBuilder keepAs = new StringBuilder();
-    if (match.getWhere() != null) {
-      Where where = match.getWhere();
+    if (query.getWhere() != null) {
+      Where where = query.getWhere();
       if (where.getShortLabel() != null) {
         keepAs.append(where.getShortLabel());
+      }
+      else if (where.getOperator()!=null) {
+        keepAs.append(where.getOperator().toString());
+        if (where.getValue()!=null) {
+          keepAs.append(where.getValue()).append("_").append(where.getUnits()!=null?where.getUnits().getName():"");
+        }
+        if (where.getCompare()!=null) {
+          keepAs.append("_relative");
+        }
       }
       if (where.getAnd() != null) {
         for (Where and : where.getAnd()) {
@@ -1526,38 +1567,20 @@ public class EqdResources {
       }
       return keepAs.toString();
     }
-    if (match.getOr() != null) {
-      for (Match or : match.getOr()) {
+    if (query.getOr() != null) {
+      for (Query or : query.getOr()) {
         if (!keepAs.isEmpty())
           keepAs.append("_");
         keepAs.append(this.createKeepAs(or));
       }
-    } else if (match.getNodeRef() != null) {
-      keepAs.append(createKeepAs(nodeRefMap.get(match.getNodeRef())));
+    }
+    matchCounter++;
+    if (keepAs.isEmpty()) {
+      keepAs.append("match").append(matchCounter);
     }
     return keepAs.toString();
   }
 
-  private void setKeepMatchNode(Match match, String affix) {
-    if (match.getAnd() != null) {
-      setKeepMatchNode(match.getAnd().getLast(), affix);
-      return;
-    } else if (match.getOr() != null) {
-      match.setNode(createKeepAs(match) + affix);
-      return;
-    }
-    StringBuilder keepAs = new StringBuilder();
-    if (match.getWhere() != null) {
-      keepAs.append(createKeepAs(match));
-      if (keepAs.isEmpty() && match.getNode() == null) {
-        matchCounter++;
-        match.setNode("m_" + matchCounter);
-      } else {
-        match.setNode(keepAs + (affix != null ? affix : ""));
-      }
-    } else if (match.getNodeRef() != null) {
-      match.setNode(createKeepAs(nodeRefMap.get(match.getNodeRef()))
-        + (affix != null ? ("_" + affix) : ""));
-    }
-  }
+
+
 }
