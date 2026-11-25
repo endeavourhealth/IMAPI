@@ -908,7 +908,7 @@ class SetRepository {
           node.setIri(bs.getValue("member").stringValue()).setName(bs.getValue("name").stringValue())
           if (bs.getValue("entailment") != null) {
             val entailment = bs.getValue("entailment").stringValue()
-            node.setEntails(Entail.valueOf(entailment))
+            node.setEntails(Entail.fromValue(entailment))
             if (bs.getValue("exclude") != null) {
               node.setExclude(true)
             }

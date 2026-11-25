@@ -17,6 +17,8 @@ class SetOptions {
     private set
   var subsumptions: MutableList<String>? = null
     private set
+  var eclQuery: String? = null
+    private set
 
   constructor(
     setIri: String?,
