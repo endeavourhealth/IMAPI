@@ -45,7 +45,7 @@ class SecurityServiceTest {
 
   @BeforeEach
   void setUp() {
-    when(casdoor.settings()).thenReturn(new CasdoorSettings("https://auth", "https://auth", "Endeavour", "id", "secret", "Endeavour/TestEnforcer", List.of("client"), "RS256"));
+    when(casdoor.settings()).thenReturn(new CasdoorSettings("https://auth", "https://auth", "Endeavour", "id", "secret", "Endeavour/TestEnforcer", Map.of(), List.of("client"), "RS256"));
   }
 
   @AfterEach

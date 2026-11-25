@@ -49,4 +49,23 @@ class CasdoorSettingsTest {
     env.remove("CASDOOR_ALLOWED_CLIENT_IDS");
     assertThrows(IllegalStateException.class, () -> CasdoorSettings.from(env).requireConfigured());
   }
+
+  @Test
+  void neverReturnsImapisOwnClientId() {
+    var env = new java.util.HashMap<>(FULL);
+    env.put("CASDOOR_APP_IMAPI_CLIENT_ID", "id"); // the same as CASDOOR_CLIENT_ID
+    CasdoorSettings settings = CasdoorSettings.from(env);
+    assertTrue(settings.appAuthConfig("IMAPI").isEmpty());
+    assertTrue(settings.appAuthConfig("CLIENT").isEmpty(), "CASDOOR_CLIENT_ID is not an app variable");
+    IllegalStateException e = assertThrows(IllegalStateException.class, settings::requireConfigured);
+    assertTrue(e.getMessage().contains("CASDOOR_APP_IMAPI_CLIENT_ID"));
+  }
+
+  @Test
+  void noAppConfigWithoutACasdoorUrl() {
+    var env = new java.util.HashMap<>(FULL);
+    env.remove("CASDOOR_URL");
+    env.put("CASDOOR_APP_IMDIRECTORY_CLIENT_ID", "12345");
+    assertTrue(CasdoorSettings.from(env).appAuthConfig("IMDirectory").isEmpty());
+  }
 }

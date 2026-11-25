@@ -26,7 +26,7 @@ class CasdoorClientTest {
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
   private final CasdoorSettings settings = new CasdoorSettings("https://auth.example.org", "https://auth.example.org", "Endeavour", "app-id", "app-secret",
-    "Endeavour/TestEnforcer", List.of("client"), "RS256");
+    "Endeavour/TestEnforcer", Map.of(), List.of("client"), "RS256");
   private MockRestServiceServer server;
   private MutableClock clock;
   private CasdoorClient client;
