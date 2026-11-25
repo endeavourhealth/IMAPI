@@ -369,6 +369,12 @@ public class QueryDescriptor {
     if (set.getQuery() != null) {
       describeMatch(set.getQuery());
     }
+    if (set.getIn() != null){
+      for (IriLD iriLD : set.getIn()){
+        if (iriLD.getIri() != null)
+          iriLD.setName(getTermInContext(iriLD.getIri()));
+      }
+    }
   }
 
 

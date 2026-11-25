@@ -17,7 +17,7 @@ public class SparqlConverter {
   private Query query;
   private Update update;
   private Set<TTIriRef> statusFilter;
-
+  private Set<TTIriRef> schemeFilter;
 
   public SparqlConverter(QueryRequest queryRequest) throws QueryException {
     this.queryRequest = queryRequest;
@@ -84,8 +84,9 @@ public class SparqlConverter {
    *
    * @return String of SPARQL
    **/
-  public String getSelectSparql(Set<TTIriRef> statusFilter, boolean countOnly, boolean highestUsage) throws QueryException {
+  public String getSelectSparql(Set<TTIriRef> statusFilter, Set<TTIriRef> schemeFilter, boolean countOnly, boolean highestUsage) throws QueryException {
     this.statusFilter = statusFilter;
+    this.schemeFilter = schemeFilter;
     return getFullSelectSparql(this.query, countOnly, highestUsage);
   }
 
@@ -94,8 +95,9 @@ public class SparqlConverter {
   }
 
 
-  public String getSelectSparql(Query query, Set<TTIriRef> statusFilter, boolean countOnly, boolean highestUsage) throws QueryException {
+  public String getSelectSparql(Query query, Set<TTIriRef> statusFilter, Set<TTIriRef> schemeFilter, boolean countOnly, boolean highestUsage) throws QueryException {
     this.statusFilter = statusFilter;
+    this.schemeFilter = schemeFilter;
 
     return getFullSelectSparql(query, countOnly, highestUsage);
   }
@@ -141,23 +143,35 @@ public class SparqlConverter {
       mainEntity = query.getAs();
     if (query.getParameter() != null)
       mainEntity = query.getParameter().replace("$", "");
+    String mainSubject= mainEntity;
+    if (this.queryRequest.isIncludeInactive())
+      mainSubject= mainEntity+1;
     whereQl.append("WHERE {");
     if (query.getTypeOf() != null) {
-      whereQl.append("?").append(mainEntity).append(" rdf:type ").append(iriFromString(query.getTypeOf().getIri())).append(".\n");
+      whereQl.append("?").append(mainSubject).append(" rdf:type ").append(iriFromString(query.getTypeOf().getIri())).append(".\n");
     }
     if (queryRequest.getAskIri() != null) {
-      whereQl.append(" VALUES ").append("?").append(mainEntity).append("{").append(iriFromString(queryRequest.getAskIri())).append("}\n");
+      whereQl.append(" VALUES ").append("?").append(mainSubject).append("{").append(iriFromString(queryRequest.getAskIri())).append("}\n");
     }
-    processMatch(sparql, whereQl, mainEntity, query);
+    processMatch(sparql, whereQl, mainSubject, query);
 
     if ((includeReturns) && null != query.getReturn()) {
       for (Return returnProperty : query.getReturn()) {
         processReturn(sparql, whereQl, returnProperty, mainEntity);
       }
+
     }
+    if (queryRequest.isIncludeInactive()){
+      whereQl.append("\n{\n BIND (?").append(mainSubject).append(" as ?").append(mainEntity).append(")\n}\n");
+      whereQl.append("UNION\n{\n");
+      whereQl.append("?inactive <").append(IM.SUBSUMED_BY.toString()).append("> ?").append(mainSubject).append(".\n");
+      whereQl.append(" Bind (?inactive as ?").append(mainEntity).append("\n)\n}\n");
+    }
+
 
     o++;
     String statusVar = "status" + o;
+    String schemeVar = "scheme" + o;
 
     if (null != statusFilter && !statusFilter.isEmpty()) {
       List<String> statusStrings = new ArrayList<>();
@@ -166,6 +180,14 @@ public class SparqlConverter {
       }
       whereQl.append("?").append(mainEntity).append(" im:status ?").append(statusVar).append(".\n");
       whereQl.append("VALUES ?").append(statusVar).append("{").append(String.join(" ", statusStrings)).append("}\n");
+    }
+    if (null != schemeFilter && !schemeFilter.isEmpty()) {
+      List<String> schemeStrings = new ArrayList<>();
+      for (TTIriRef scheme : schemeFilter) {
+        schemeStrings.add("<" + scheme.getIri() + ">");
+      }
+      whereQl.append("?").append(mainEntity).append(" im:scheme ?").append(schemeVar).append(".\n");
+      whereQl.append("VALUES ?").append(schemeVar).append("{").append(String.join(" ", schemeStrings)).append("}\n");
     }
     if (query.isActiveOnly()) {
       whereQl.append("?").append(mainEntity).append(" im:status im:Active.\n");
@@ -179,8 +201,8 @@ public class SparqlConverter {
     sparql.append(whereQl).append("\n");
   }
 
-  public String getCountSparql(Set<TTIriRef> statusFilter) throws QueryException {
-    return getSelectSparql(this.query, statusFilter, true, false);
+  public String getCountSparql(Set<TTIriRef> statusFilter, Set<TTIriRef> schemeFilter) throws QueryException {
+    return getSelectSparql(this.query, statusFilter, schemeFilter, true, false);
   }
 
   private String escape(String text) {
@@ -223,15 +245,6 @@ public class SparqlConverter {
     if (query.getPath() != null) {
       for (Path pathMatch : query.getPath()) {
         pathVariable = processPath(whereQl, subject, pathMatch);
-      }
-    }
-    if (query.getAnd() != null) {
-      for (int i = 0; i < query.getAnd().size(); i++) {
-        Query subQuery = query.getAnd().get(i);
-        if (subQuery.getAs() != null) {
-          subselects.append("{").append(getSelectSparql(subQuery, false)).append("}\n");
-        } else
-          processMatch(selectQl, whereQl, subject, subQuery);
       }
     }
     if (query.getAnd() != null) {
@@ -403,10 +416,20 @@ public class SparqlConverter {
     Entail entail = instance.getEntails();
     if (entail == null)
       entail= Entail.equal;
-    if (instance.isExclude()) {
-      outTypes.computeIfAbsent(entail, m -> new ArrayList<>()).add(instance);
-    } else
-      inTypes.computeIfAbsent(entail, m -> new ArrayList<>()).add(instance);
+    if (instance.getIn()==null) {
+      if (instance.isExclude()) {
+        outTypes.computeIfAbsent(entail, m -> new ArrayList<>()).add(instance);
+      } else
+        inTypes.computeIfAbsent(entail, m -> new ArrayList<>()).add(instance);
+    }
+    else {
+      for (IriLD in : instance.getIn()) {
+        if (instance.isExclude()) {
+          outTypes.computeIfAbsent(entail, m -> new ArrayList<>()).add(new Node().setIri(in.getIri()));
+        } else
+          inTypes.computeIfAbsent(entail, m -> new ArrayList<>()).add(new Node().setIri(in.getIri()));
+      }
+    }
   }
 
   private void processMatchIsMemberOf(StringBuilder whereQl, String subject, String object, String inList) {

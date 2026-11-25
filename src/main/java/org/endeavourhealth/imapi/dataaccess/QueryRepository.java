@@ -56,7 +56,7 @@ public class QueryRepository {
     Integer size = queryRequest.getPage() != null ? queryRequest.getPage().getPageSize() : 0;
     try (IMDB conn = IMDB.Companion.getConnection()) {
       SparqlConverter converter = new SparqlConverter(queryRequest);
-      String spq = converter.getSelectSparql(queryRequest.getQuery(), null, false, highestUsage);
+      String spq = converter.getSelectSparql(queryRequest.getQuery(), null,null, false, highestUsage);
       ObjectNode resultNode = graphSelectSearch(queryRequest, spq, conn, result);
       if (queryRequest.getPage() != null) {
         resultNode.put("page", page);

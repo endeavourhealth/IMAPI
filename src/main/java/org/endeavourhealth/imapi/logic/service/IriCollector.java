@@ -91,6 +91,11 @@ public class IriCollector {
         collectMatchIris(node.getQuery(), iriSet);
       else if (node.getIri() != null)
         iriSet.add(node.getIri());
+      if (node.getIn() != null){
+        for (IriLD iriLD : node.getIn()){
+          iriSet.add(iriLD.getIri());
+        }
+      }
     }
     for (List<Query> queries : Arrays.asList(query.getOr(), query.getAnd(),
       query.getRule(),query.getUnion(),query.getWith())) {

@@ -766,4 +766,69 @@ public class LogicOptimizer {
   public static void clearAsMap() {
     asMap.clear();
   }
+
+  public static void optimiseOrs(Query query) {
+      sortSimpleOrs(query);
+
+
+  }
+
+  private static void sortSimpleOrs(Query query) {
+    if (query.getIs()!=null &&query.getIs().getQuery()!=null){
+      sortSimpleOrs(query.getIs().getQuery());
+      return;
+    }
+    if (query.getAnd()!=null){
+      for (Query and:query.getAnd()){
+        sortSimpleOrs(and);
+      }
+      return;
+    }
+    if (query.getOr()==null){
+      return;
+    }
+    List<IriLD> in= new ArrayList<>();
+    List<Query> newOrs= new ArrayList<>();
+    Query firstOr= query.getOr().getFirst();
+    if (firstOr.getIs()==null){
+      return;
+    }
+    if (firstOr.getIs().getIn()!=null){
+      return;
+    }
+    Entail entail= firstOr.getIs().getEntails();
+    in.add(new IriLD().setIri(firstOr.getIs().getIri()).setName(firstOr.getIs().getName()));
+    for (int i=1; i<query.getOr().size(); i++) {
+      Query subQuery= query.getOr().get(i);
+      if (subQuery.getIs()==null||subQuery.getOr()!=null||subQuery.getAnd()!=null
+      ||subQuery.getWith()!=null||subQuery.getThen()!=null||subQuery.getWhere()!=null
+        ||subQuery.getOrderBy()!=null){
+        return;
+      }
+      if (subQuery.getIs().getIn()!=null){
+        return;
+      }
+      if (subQuery.getIs().getEntails()==entail){
+        in.add(new IriLD().setIri(subQuery.getIs().getIri()).setName(subQuery.getIs().getName()));
+      }
+      else {
+        newOrs.add(new Query().setIs(new Node().setEntails(entail).setIn(in)));
+        in = new ArrayList<>();
+        entail= subQuery.getIs().getEntails();
+      }
+    }
+    if (!in.isEmpty()){
+      newOrs.add(new Query().setIs(new Node().setEntails(entail).setIn(in)));
+    }
+    if (!newOrs.isEmpty()){
+      if (newOrs.size()>1){
+        query.setOr(newOrs);
+      }
+      else {
+        query.setOr(null);
+        query.setIs(newOrs.getFirst().getIs());
+      }
+    }
+  }
+
 }

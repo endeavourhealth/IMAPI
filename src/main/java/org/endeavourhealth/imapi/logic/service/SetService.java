@@ -140,24 +140,11 @@ public class SetService {
     return setRepository.getMembers(iri, entailments, pageNumber, pageSize);
   }
 
-  public Pageable<Node> getMembersFromQuery(ECLQueryRequest request) throws QueryException {
+  public SearchResponse
+  getMembersFromQuery(ECLQueryRequest request) throws QueryException {
     EclService eclService = new EclService();
-    SearchResponse response = eclService.eclSearch(request);
-    Pageable<Node> result = new Pageable<>();
-    result.setTotalCount(response.getTotalCount());
-    result.setCurrentPage(response.getPage());
-    result.setPageSize(response.getSize());
-    result.setResult(new ArrayList<>());
-    if (response.getEntities() != null) {
-      for (SearchResultSummary entity : response.getEntities()) {
-        Node node = new Node();
-        node.setIri(entity.getIri());
-        node.setName(entity.getName());
-        node.setCode(entity.getCode());
-        result.getResult().add(node);
-      }
-    }
-    return result;
+
+    return eclService.eclSearch(request);
   }
 
   public SetContent getSetContent(SetOptions options) throws QueryException, JsonProcessingException {
@@ -434,6 +421,10 @@ public class SetService {
 
   public Integer getMemberCount(String iri) {
     return setRepository.getMemberCount(iri);
+  }
+
+  public SearchResponse getCurrentMembersFromIri(String iri, boolean includeInactive) {
+    return setRepository.getCurrentMembersFromIri(iri,includeInactive);
   }
 
   private static final class SubsetTree {

@@ -7,6 +7,7 @@ import org.endeavourhealth.imapi.model.iml.Page
 import org.endeavourhealth.imapi.model.imq.*
 import org.endeavourhealth.imapi.model.responses.SearchResponse
 import org.endeavourhealth.imapi.model.search.SearchResultSummary
+import org.endeavourhealth.imapi.queryengine.LogicOptimizer
 import org.endeavourhealth.imapi.queryengine.QueryDescriptor
 import org.endeavourhealth.imapi.queryengine.SparqlOptimizer
 import org.endeavourhealth.imapi.transforms.ECLToIMQ
@@ -51,8 +52,9 @@ class EclService {
   }
 
   @Throws(QueryException::class)
-  fun getEclSearchTotalCount(request: ECLQueryRequest): Int {
-    return setRepository.getSetExpansionTotalCount(request.query, request.statusFilter)
+  fun
+    getEclSearchTotalCount(request: ECLQueryRequest): Int {
+    return setRepository.getSetExpansionTotalCount(request.query, request.statusFilter,request.schemeFilter,request.isIncludeInactive)
   }
 
   @Throws(QueryException::class)
@@ -60,7 +62,8 @@ class EclService {
     return setRepository.getSetExpansionFromQuery(
       request.query,
       request.statusFilter,
-      mutableListOf(),
+      request.schemeFilter,
+      request.isIncludeInactive,
       Page()
         .setPageNumber(request.page)
         .setPageSize(request.size)
@@ -70,8 +73,7 @@ class EclService {
   @Throws(QueryException::class)
   fun eclSearch(request: ECLQueryRequest): SearchResponse {
     SparqlOptimizer().optimizeQuery(request.query)
-    var totalCount = 0
-    if (request.page == 1) totalCount = getEclSearchTotalCount(request)
+    var totalCount = getEclSearchTotalCount(request)
     val evaluated = evaluateECLQuery(request)
     val evaluatedAsSummary = evaluated
       .map { concept ->
@@ -146,6 +148,10 @@ class EclService {
   fun getEclFromMembers(iri: String?): String? {
     val ecl = MembersToEcl().getEclFromMembers(iri)
     return ecl
+  }
+
+  fun optimiseOrs(query: Query){
+    LogicOptimizer.optimiseOrs(query);
   }
 
 }

@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.endeavourhealth.imapi.logic.service.ConceptService;
 import org.endeavourhealth.imapi.logic.service.EclService;
 import org.endeavourhealth.imapi.model.customexceptions.EclFormatException;
+import org.endeavourhealth.imapi.model.imq.Query;
 import org.endeavourhealth.imapi.utility.MetricsHelper;
 import org.endeavourhealth.imapi.utility.MetricsTimer;
 import org.endeavourhealth.imapi.model.imq.ECLQueryRequest;
@@ -180,4 +181,21 @@ public class EclController {
       return eclService.getEclFromMembers(iri);
     }
   }
+
+  @PostMapping(value = "/optimiseOrs", consumes = "application/json", produces = "application/json")
+  @Operation(
+    summary = "Optimises ecl ors",
+    description = "simplifies query ors to query is/in if possible"
+  )
+  public Query optimiseOrs(
+    HttpServletRequest request,
+    @RequestBody ECLQueryRequest eclQueryRequest
+  ) throws QueryException {
+    try (MetricsTimer t = MetricsHelper.recordTime("API.ECL.OptimiseOrs.POST")) {
+      log.debug("optimise ors");
+      eclService.optimiseOrs(eclQueryRequest.getQuery());
+      return eclQueryRequest.getQuery();
+    }
+  }
+
 }

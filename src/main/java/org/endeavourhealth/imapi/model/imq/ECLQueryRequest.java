@@ -16,10 +16,38 @@ public class ECLQueryRequest {
   private boolean showNames;
   private ECLStatus status;
   private boolean includeLegacy;
-  private int limit = 1000;
+  private int limit = 5000;
   private Set<TTIriRef> statusFilter = new HashSet<>();
-  private int page = 1;
-  private int size = 20;
+  private int page;
+  private int size;
+  private boolean includeInactive;
+  private Set<TTIriRef> schemeFilter = new HashSet<>();
+
+  public Set<TTIriRef> getSchemeFilter() {
+    return schemeFilter;
+  }
+
+  public ECLQueryRequest setSchemeFilter(Set<TTIriRef> schemeFilter) {
+    this.schemeFilter = schemeFilter;
+    return this;
+  }
+
+  public ECLQueryRequest addSchemeFilter(TTIriRef schemeFilter) {
+    if (this.schemeFilter==null)
+      this.schemeFilter = new HashSet<>();
+    this.schemeFilter.add(schemeFilter);
+    return this;
+  }
+
+
+  public ECLQueryRequest setIncludeInactive(boolean includeInactive) {
+    this.includeInactive = includeInactive;
+    return this;
+  }
+
+  public boolean isIncludeInactive() {
+    return includeInactive;
+  }
 
   public int getLimit() {
     return limit;

@@ -117,7 +117,10 @@ public class IMQToECL {
 
 
   private boolean isBlankMatch(Query query) {
-    return query.getIs() != null && query.getIs().getIri() == null && query.getWhere() == null;
+    if (query.getIs() != null && query.getWhere() == null){
+      return query.getIs().getIri() == null && query.getIs().getIn() == null && query.getIs().getQuery() == null;
+    }
+    return false;
   }
 
   public ECLType getEclType(Query query) {
@@ -174,7 +177,8 @@ public class IMQToECL {
   }
 
   private void match(Query query, StringBuilder ecl, boolean includeNames, boolean isNested) throws QueryException {
-    if ((query.getIs() == null || (query.getIs().getIri() == null && query.getIs().getQuery() == null)) && query.getOr() == null && query.getAnd() == null) {
+    Node is= query.getIs();
+    if ((is== null || (is.getIri() == null && is.getQuery() == null &&is.getIn()==null)) && query.getOr() == null && query.getAnd() == null) {
       if (query.getWhere() != null)
         ecl.append("*");
       else throw new QueryException("Must have concept if no refinement");
@@ -206,9 +210,12 @@ public class IMQToECL {
   private boolean needsExcludeBracket(List<Query> queries) {
     if (queries.size() > 1) return true;
     for (Query m : queries) {
+      if (m.getIs()!=null &&m.getIs().getIn()!=null &&m.getIs().getIn().size()>1)
+        return true;
       if (m.getWhere() != null) return true;
       if (m.getAnd() != null || m.getOr() != null) return true;
     }
+
     return false;
   }
 
@@ -282,7 +289,8 @@ public class IMQToECL {
   }
 
   private void matchInstanceOf(Query query, StringBuilder ecl, boolean includeNames) throws QueryException {
-    if (query.getIs().getIri() == null && query.getIs().getQuery() == null && query.getWhere() == null)
+    Node is= query.getIs();
+    if (is.getIri() == null && is.getQuery() == null && query.getWhere() == null &&is.getIn()==null)
       throw new QueryException("Must have concept if no refinement");
     if (query.getIs().isInvalid())
       setErrorStatus(ecl, "unknown concept");
@@ -291,8 +299,24 @@ public class IMQToECL {
       ecl.append("(");
       expressionMatch(query.getIs().getQuery(), ecl, includeNames, false);
       ecl.append(")");
-    } else
-      addClass(query.getIs(), ecl, includeNames);
+    } else if (is.getIn()!=null) {
+      ecl.append(getSubsumption(is));
+      if (!getSubsumption(is).isEmpty())
+        ecl.append("(");
+      int count=0;
+      for (IriLD iriLD : is.getIn()){
+        count++;
+        if (count>1)
+          ecl.append("OR ");
+        addInConcept(ecl, includeNames,iriLD.getIri(),iriLD.getName());
+        ecl.append("\n");
+      }
+      if (!getSubsumption(is).isEmpty())
+        ecl.append(")");
+
+    }
+      else
+        addClass(query.getIs(), ecl, includeNames);
 
   }
 
@@ -370,6 +394,11 @@ public class IMQToECL {
   private void addConcept(StringBuilder ecl, boolean includeName, String subsumption, String id, String name) {
     String iriRef = checkMember(id, name, includeName);
     ecl.append(subsumption).append(iriRef);
+  }
+
+  private void addInConcept(StringBuilder ecl, boolean includeName, String id, String name){
+    String iriRef= checkMember(id, name, includeName);
+    ecl.append(iriRef);
   }
 
   private void addClass(Node exp, StringBuilder ecl, boolean includeName) {

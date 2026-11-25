@@ -23,6 +23,7 @@ import org.endeavourhealth.imapi.model.imq.QueryException;
 import org.endeavourhealth.imapi.model.requests.EditRequest;
 import org.endeavourhealth.imapi.model.requests.SetDistillationRequest;
 import org.endeavourhealth.imapi.model.requests.SetExportRequest;
+import org.endeavourhealth.imapi.model.responses.SearchResponse;
 import org.endeavourhealth.imapi.model.security.Action;
 import org.endeavourhealth.imapi.model.security.Resource;
 import org.endeavourhealth.imapi.model.security.User;
@@ -78,7 +79,7 @@ public class SetController {
   public Pageable<Node> getMembers(
     HttpServletRequest request,
     @RequestParam(name = "iri") String iri,
-    @RequestParam(name = "entailments", required = false) Boolean entailments,
+    @RequestParam(name = "entailments", required = false) boolean entailments,
     @RequestParam(name = "page", required = false) Integer page,
     @RequestParam(name = "size", required = false) Integer size
   ) {
@@ -89,6 +90,17 @@ public class SetController {
         size = 10;
       }
       return setService.getDirectOrEntailedMembersFromIri(iri, entailments, page, size);
+    }
+  }
+  @GetMapping(value = "/protected/currentMembers")
+  @Operation(summary = "Get current members", description = "Retrieves summary information for members")
+  public SearchResponse geCurrentMembers(
+    HttpServletRequest request,
+    @RequestParam(name = "iri") String iri,
+    @RequestParam(name="includeInactive") boolean includeInactive) {
+    try (MetricsTimer t = MetricsHelper.recordTime("API.Set.CurrentMembers.GET")) {
+      log.debug("getCurrentMembers");
+      return setService.getCurrentMembersFromIri(iri,includeInactive);
     }
   }
 
@@ -107,7 +119,7 @@ public class SetController {
 
   @PostMapping(value = "/protected/membersFromQuery")
   @Operation(summary = "Get entailed members", description = "Retrieves direct or entailed members from a given IRI with pagination support.")
-  public Pageable<Node> getMembersFromQuery(
+  public SearchResponse getMembersFromQuery(
     HttpServletRequest request,
     @RequestBody ECLQueryRequest eclRequest
   ) throws QueryException {

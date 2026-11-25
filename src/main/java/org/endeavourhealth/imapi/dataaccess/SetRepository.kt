@@ -16,8 +16,11 @@ import org.endeavourhealth.imapi.model.imq.Node
 import org.endeavourhealth.imapi.model.imq.Query
 import org.endeavourhealth.imapi.model.imq.QueryException
 import org.endeavourhealth.imapi.model.requests.QueryRequest
+import org.endeavourhealth.imapi.model.responses.SearchResponse
+import org.endeavourhealth.imapi.model.search.SearchResultSummary
 import org.endeavourhealth.imapi.model.tripletree.TTEntity
 import org.endeavourhealth.imapi.model.tripletree.TTIriRef
+import org.endeavourhealth.imapi.model.tripletree.TTIriRef.iri
 import org.endeavourhealth.imapi.model.tripletree.TTNode
 import org.endeavourhealth.imapi.vocabulary.*
 import org.slf4j.LoggerFactory
@@ -47,16 +50,19 @@ class SetRepository {
 
   @Throws(QueryException::class)
   fun getSetExpansionFromQuery(
-    imQuery: Query, statusFilter: MutableSet<TTIriRef>, schemeFilter: MutableList<String>, page: Page?
+    imQuery: Query, statusFilter: MutableSet<TTIriRef>, schemeFilter: MutableSet<TTIriRef>,
+    includeInactive: Boolean,page: Page?
   ): MutableSet<Concept> {
     setReturn(imQuery, false)
     val newRequest = QueryRequest().setQuery(imQuery)
+    newRequest.setIncludeInactive(includeInactive)
     if (page?.pageNumber != null && null != page.pageSize) newRequest.setPage(page)
-    val sql = SparqlConverter(newRequest).getSelectSparql(statusFilter, false, false)
+    val sql = SparqlConverter(newRequest).getSelectSparql(statusFilter,schemeFilter, false, false)
     val entityVariable = imQuery.`as` ?: "entity"
+    val schemeIris: List<String> = schemeFilter.map { it.iri }
     IMDB.getConnection().use { conn ->
       val qry = conn.prepareTupleSparql(sql)
-      return expand(qry, false, false, schemeFilter, entityVariable)
+      return expand(qry, schemeIris.toMutableList(), entityVariable)
     }
   }
 
@@ -188,15 +194,17 @@ class SetRepository {
 
 
   @Throws(QueryException::class)
-  fun getSetExpansionTotalCount(imQuery: Query, statusFilter: MutableSet<TTIriRef>): Int {
+  fun getSetExpansionTotalCount(imQuery: Query, statusFilter: MutableSet<TTIriRef>,schemeFilter: MutableSet<TTIriRef>,includeInactive:Boolean): Int {
     //add scheme filter
-    val newRequest = QueryRequest().setQuery(imQuery)
-    val sql = SparqlConverter(newRequest).getCountSparql(statusFilter)
+    val newRequest = QueryRequest().setQuery(imQuery);
+    newRequest.setIncludeInactive(includeInactive)
+    val sql = SparqlConverter(newRequest).getCountSparql(statusFilter,schemeFilter)
     IMDB.getConnection().use { conn ->
       val qry = conn.prepareTupleSparql(sql)
       return getCountForSparql(qry)
     }
   }
+
 
   fun getSubsetIrisWithNames(iri: String): MutableSet<TTIriRef> {
     val result: MutableSet<TTIriRef> = mutableSetOf()
@@ -223,7 +231,7 @@ class SetRepository {
           try {
             val subset = TTIriRef(subsetIri, subsetName)
             result.add(subset)
-          } catch (ignored: IllegalArgumentException) {
+          } catch (_: IllegalArgumentException) {
             log.warn("Invalid subset iri [{}] for set [{}]", subsetIri, iri)
           }
         }
@@ -234,12 +242,16 @@ class SetRepository {
 
   private fun expand(
     qry: TupleQuery,
-    includeLegacy: Boolean,
-    subsumedBy: Boolean,
     schemes: MutableList<String>,
     entityVariable: String
   ): MutableSet<Concept> {
-    return expandBySet(qry, includeLegacy, subsumedBy, schemes, entityVariable, null).getOrDefault("", LinkedHashSet())
+    return expandBySet(qry,
+      includeLegacy = false,
+      subsumedBy = false,
+      schemes = schemes,
+      entityVariable = entityVariable,
+      setVariable = null
+    ).getOrDefault("", LinkedHashSet())
   }
 
   private fun expandBySet(
@@ -657,7 +669,7 @@ class SetRepository {
     val subsumedBy = subsumptionPredicates.isNotEmpty()
     IMDB.getConnection().use { conn ->
       val qry = conn.prepareTupleSparql(select.toString())
-      return expandBySet(qry, includeLegacy, subsumedBy, mutableListOf(), "entity", "setIri")
+      return expandBySet(qry, includeLegacy, subsumedBy, schemes, "entity", "setIri")
     }
   }
 
@@ -836,20 +848,19 @@ class SetRepository {
     return getMemberWithPredicate(iri, IM.HAS_MEMBER.toString(), pageNumber, pageSize)
   }
 
-  private fun getMemberWithPredicate(iri: String, predicate: String, pageNumber: Int, pageSize: Int): Pageable<Node> {
+  private fun getMemberWithPredicate(iri: String, predicate: String,pageNumber: Int, pageSize: Int): Pageable<Node> {
     val result = Pageable<Node>()
     result.setTotalCount(0)
     var sql = """
       Select (count(distinct ?instance) as ?count)
       where {
-      ?s ?p ?instance
+      <${iri}> <${predicate}> ?instance.
+   
       }
       
       """.trimIndent()
     IMDB.getConnection().use { conn ->
       val qry = conn.prepareTupleSparql(sql)
-      qry.setBinding("s", Values.iri(iri))
-      qry.setBinding("p", Values.iri(predicate))
       qry.evaluate().use { rsCount ->
         val bsCount = rsCount.next()
         result.setTotalCount((bsCount.getValue("count") as Literal).intValue())
@@ -875,7 +886,7 @@ class SetRepository {
         """.trimIndent()
     } else {
       sql = """
-        Select ?member ?name
+        Select ?member ?name ?status
         where {
          ${value("s", iri)} 
         ?s im:hasMember ?member.
@@ -1171,7 +1182,7 @@ class SetRepository {
         while (rs.hasNext()) {
           val bs = rs.next()
           inclusions.getOrPut(bs.getValue("parent").stringValue() as String) { mutableMapOf() }
-            .getOrPut("inclusion" as String){ mutableSetOf()}
+            .getOrPut("inclusion"){ mutableSetOf()}
             .add(bs.getValue("inclusion").stringValue() as String)
         }
       }
@@ -1204,7 +1215,7 @@ class SetRepository {
         while (rs.hasNext()) {
           val bs = rs.next()
           val parent= levelNParents.get(bs.getValue("parent").stringValue() as String)
-          parent?.getOrPut("exclusion" as String){ mutableSetOf()}
+          parent?.getOrPut("exclusion"){ mutableSetOf()}
             ?.add(bs.getValue("exclusion").stringValue() as String)
         }
       }
@@ -1232,8 +1243,100 @@ class SetRepository {
     }
   }
 
+  fun getCurrentMembersFromIri(iri: String,includeInactive: Boolean): SearchResponse {
+    val result = SearchResponse()
+    result.setTotalCount(0)
+    var sql=""
+    if (!includeInactive) {
+      sql = """
+      Select (count(distinct ?instance) as ?count)
+      where {
+      <${iri}> im:hasMember ?instance.
+      }
+      """.trimIndent()
+    }
+    else {
+      sql = """
+         Select (count(distinct ?member) as ?count)
+        WHERE {
+            ${value("set",iri)}
+            ?set im:hasMember ?instance .
+            {
+                BIND(?instance AS ?member)
+            }
+            UNION
+            {
+                ?inactive im:subsumedBy ?instance .
+                BIND(?inactive AS ?member)
+            }
+        }
+      """.trimIndent()
+    }
+    IMDB.getConnection().use { conn ->
+      val qry = conn.prepareTupleSparql(sql)
+      qry.evaluate().use { rsCount ->
+        val bsCount = rsCount.next()
+        result.setTotalCount((bsCount.getValue("count") as Literal).intValue())
+      }
+    }
+
+    if (result.totalCount == 0) return result
+    if (!includeInactive) {
+      sql = """
+        Select ?member ?name ?code ?status
+        where {
+         ${value("s", iri)} 
+        ?s im:hasMember ?member.
+        ?member rdfs:label ?name.
+        ?member im:status ?status.
+        optional {?member im:code ?code}
+        }        
+        """.trimIndent() }
+    else {
+      sql="""
+      SELECT DISTINCT ?member ?name ?code ?status
+        WHERE {
+          ${value("s", iri)} 
+          ?s im:hasMember ?instance .
+          {
+            BIND(?instance AS ?member)
+          }
+          UNION
+          {
+            ?inactive im:subsumedBy ?instance .
+            BIND(?inactive AS ?member)
+          }
+        ?member rdfs:label ?name.
+        ?member im:status ?status.
+        optional {?member im:code ?code}
+        }
+      """.trimIndent()
+
+    }
+
+    val resultSet: MutableList<SearchResultSummary> = mutableListOf()
+    IMDB.getConnection().use { conn ->
+
+
+      val qry = conn.prepareTupleSparql(sql)
+      qry.evaluate().use { rs ->
+        while (rs.hasNext()) {
+          val bs = rs.next()
+          val node = SearchResultSummary()
+          resultSet.add(node)
+          node.setIri(bs.getValue("member").stringValue()).setName(bs.getValue("name").stringValue())
+          node.setStatus(iri(bs.getValue("status").stringValue()))
+          if (bs.getValue("code")!=null) {
+            node.setCode(bs.getValue("code").stringValue())
+          }
+          }
+        }
+      }
+    result.setEntities(resultSet);
+    return result
+  }
+
   companion object {
-    const val EXPANDED_ENTITY: String = "expandedEntity"
     const val ENTITY: String = "entity"
     const val IM_1_ID: String = "im1Id"
     const val ENTITY_TYPE: String = "entityType"

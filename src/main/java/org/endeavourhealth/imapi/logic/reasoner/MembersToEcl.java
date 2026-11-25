@@ -1,8 +1,15 @@
 package org.endeavourhealth.imapi.logic.reasoner;
 
 import org.endeavourhealth.imapi.dataaccess.SetRepository;
+import org.endeavourhealth.imapi.logic.service.EntityService;
 import org.endeavourhealth.imapi.model.Pageable;
+import org.endeavourhealth.imapi.model.imq.ECLQueryRequest;
+import org.endeavourhealth.imapi.model.imq.Entail;
 import org.endeavourhealth.imapi.model.imq.Node;
+import org.endeavourhealth.imapi.model.imq.Query;
+import org.endeavourhealth.imapi.model.tripletree.TTEntity;
+import org.endeavourhealth.imapi.model.tripletree.TTIriRef;
+import org.endeavourhealth.imapi.transforms.IMQToECL;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -12,12 +19,12 @@ public class MembersToEcl {
 
 public String getEclFromMembers(String iri) {
   Pageable<Node> memberNodes= setRepository.getMembers(iri,false,1,10000);
-  if (memberNodes.getResult()==null)
-    return "";
+  if (memberNodes.getResult()==null){
+    return getEclFromSubsets(iri);
+  }
   Set<String> members= memberNodes.getResult().stream().map(Node::getIri).collect(Collectors.toSet());
     Set<String> inclusionAncestors = new HashSet<>();
     Set<String> exclusions = new HashSet<>();
-    Set<String> newMembers = new HashSet<>();
     Map<String, Map<String, Set<String>>> level0Parents = setRepository.getLevel0ParentInclusions(iri);
     setRepository.addExclusions(iri, level0Parents);
     for (String parentIri : level0Parents.keySet()) {
@@ -46,15 +53,21 @@ public String getEclFromMembers(String iri) {
     if (!exclusions.isEmpty())
       ecl.append("(");
     int count=-1;
-    for (String ancestor:inclusionAncestors){
-      count++;
-      ancestor= ancestor.substring(ancestor.lastIndexOf("#")+1);
-      if (count>0) ecl.append("OR ");
-      ecl.append("<< ").append(ancestor).append("\n");
+    if (!inclusionAncestors.isEmpty()) {
+      for (String ancestor : inclusionAncestors) {
+        count++;
+        ancestor = ancestor.substring(ancestor.lastIndexOf("#") + 1);
+        if (count > 0) ecl.append("OR ");
+        ecl.append("<< ").append(ancestor).append("\n");
+      }
     }
+    count=0;
     for (String member:members){
       member= member.substring(member.lastIndexOf("#")+1);
-      ecl.append("OR ").append(member).append("\n");
+      count++;
+      if (count>1||!inclusionAncestors.isEmpty())
+        ecl.append("OR ");
+      ecl.append(member).append("\n");
     }
     if (!exclusions.isEmpty()) {
       ecl.append(")\n");
@@ -65,12 +78,26 @@ public String getEclFromMembers(String iri) {
         count++;
         if (count > 0)
           ecl.append("OR ");
-        ecl.append("<<").append(exclude).append("\n");
+        ecl.append(exclude).append("\n");
       }
       ecl.append(")");
     }
     return ecl.toString();
   }
+
+  private String getEclFromSubsets(String iri) {
+  Set<TTIriRef> subsets= setRepository.getSubsetIrisWithNames(iri);
+  if (subsets.isEmpty())
+    return "";
+  Query query= new Query();
+  for (TTIriRef subset:subsets){
+    query.addOr(new Query().setIs(new Node().setIri(subset.getIri()).setName(subset.getName()).setEntails(Entail.memberOf)));
+  }
+    ECLQueryRequest request= new ECLQueryRequest().setQuery(query);
+    new IMQToECL().getECLFromQuery(request);
+    return request.getEcl();
+  }
+
   private void levelN(Set<String> members,Set<String> inclusionAncestors,Set<String> exclusions) {
   Map<String,Map<String,Set<String>>> levelNParents= setRepository.getLevelNParentInclusions(members);
    setRepository.addNExclusions(members,levelNParents);

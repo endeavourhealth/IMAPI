@@ -38,8 +38,18 @@ public class QueryRequest implements ContextMap {
   private TextSearchStyle textSearchStyle;
   @Getter
   private DatabaseOption language;
+  private boolean includeInactive;
 
   public QueryRequest() {
+  }
+
+  public boolean isIncludeInactive() {
+    return includeInactive;
+  }
+
+  public QueryRequest setIncludeInactive(boolean includeInactive) {
+    this.includeInactive = includeInactive;
+    return this;
   }
 
   public QueryRequest setCohort(Set<TTIriRef> cohort) {
