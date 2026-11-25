@@ -35,7 +35,7 @@ public class ConfigController {
   @Autowired
   ConfigManager configManager;
 
-  /** Read on each request, like IMAPI's other Casdoor settings. Replaceable in tests. */
+  // Read on each request like other Casdoor settings. Replaceable in tests.
   Supplier<CasdoorSettings> casdoorSettings = CasdoorSettings::fromEnvironment;
 
   @GetMapping(value = "/monitoring")
@@ -62,7 +62,7 @@ public class ConfigController {
   }
 
   @GetMapping(value = "/auth")
-  @Operation(summary = "Get a frontend's Casdoor sign-in settings",
+  @Operation(summary = "Get app sign-in settings",
     description = "Returns CASDOOR_URL and the client id in CASDOOR_APP_<APP>_CLIENT_ID. Returns 404 if Casdoor/app not configured.")
   public ResponseEntity<CasdoorSettings.AppAuthConfig> getAuth(@RequestParam(name = "app") String app) {
     try (MetricsTimer t = MetricsHelper.recordTime("API.Config.Auth.GET")) {
