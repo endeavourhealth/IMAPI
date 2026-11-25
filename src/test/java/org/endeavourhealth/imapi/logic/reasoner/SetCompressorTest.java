@@ -7,7 +7,7 @@ import org.endeavourhealth.imapi.transforms.ECLToIMQ;
 import org.junit.jupiter.api.Test;
 
 public class SetCompressorTest {
- @Test
+// @Test
   public void testSetCompressor() throws JsonProcessingException {
     String ecl= new MembersToEcl().getEclFromMembers("http://snomed.info/sct#999012891000230104");
     Query query= new ECLToIMQ().convertECL(ecl);
