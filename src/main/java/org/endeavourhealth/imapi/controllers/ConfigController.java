@@ -11,7 +11,6 @@ import org.endeavourhealth.imapi.utility.MetricsTimer;
 import org.endeavourhealth.imapi.vocabulary.CONFIG;
 import org.endeavourhealth.imapi.vocabulary.NAMESPACE;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -63,11 +62,11 @@ public class ConfigController {
 
   @GetMapping(value = "/auth")
   @Operation(summary = "Get app sign-in settings",
-    description = "Returns CASDOOR_URL and the client id in CASDOOR_APP_<APP>_CLIENT_ID. Returns 404 if Casdoor/app not configured.")
-  public ResponseEntity<CasdoorSettings.AppAuthConfig> getAuth(@RequestParam(name = "app") String app) {
+    description = "Returns CASDOOR_URL and the client id in CASDOOR_APP_<APP>_CLIENT_ID. clientId is null if Casdoor/app not configured.")
+  public CasdoorSettings.AppAuthConfig getAuth(@RequestParam(name = "app") String app) {
     try (MetricsTimer t = MetricsHelper.recordTime("API.Config.Auth.GET")) {
       log.debug("getAuth");
-      return ResponseEntity.of(casdoorSettings.get().appAuthConfig(app));
+      return casdoorSettings.get().appAuthConfig(app);
     }
   }
 }

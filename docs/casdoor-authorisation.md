@@ -43,9 +43,10 @@ Frontends do not configure Casdoor themselves. At startup they call the public e
 ```
 GET /api/config/public/auth?app=IMDirectory
 → 200 { "url": "<CASDOOR_URL>", "clientId": "<CASDOOR_APP_IMDIRECTORY_CLIENT_ID>" }
+→ 200 { "url": "<CASDOOR_URL>", "clientId": null }      (sign-in not configured for the app)
 ```
 
-The app name is matched case-insensitively, with any run of other characters treated as `_` (`im-query-runner` finds `CASDOOR_APP_IM_QUERY_RUNNER_CLIENT_ID`). It returns `404` when `CASDOOR_URL` or the app's client id is not set, and the frontend then disables sign-in. It never returns IMAPI's own `CASDOOR_CLIENT_ID`: an app variable holding that id is ignored here, and authenticated requests fail with an error naming that variable until it is removed.
+The app name is matched case-insensitively, with any run of other characters treated as `_` (`im-query-runner` finds `CASDOOR_APP_IM_QUERY_RUNNER_CLIENT_ID`). When `CASDOOR_URL` or the app's client id is not set it still answers `200`, with `"clientId": null`, and the frontend then disables sign-in. A `404` therefore only means the endpoint was not found (wrong address, or an IMAPI without it), which frontends treat as an error rather than as "no sign-in". It never returns IMAPI's own `CASDOOR_CLIENT_ID`: an app variable holding that id is ignored here, and authenticated requests fail with an error naming that variable until it is removed.
 
 Browsers use the returned `url`, so `CASDOOR_URL` must be Casdoor's public address, and Casdoor's own `origin` setting should be the same URL so that the token issuer matches.
 

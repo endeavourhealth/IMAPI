@@ -1,5 +1,7 @@
 package org.endeavourhealth.imapi.security;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -37,6 +39,8 @@ public record CasdoorSettings(
   static final String APP_PREFIX = "CASDOOR_APP_";
   static final String APP_SUFFIX = "_CLIENT_ID";
 
+  /** What a frontend needs to sign users in. {@code clientId} is null when sign-in is not configured for the app. */
+  @JsonInclude(JsonInclude.Include.ALWAYS) // a null clientId is the answer "sign-in off", so it is always written
   public record AppAuthConfig(String url, String clientId) {
   }
 
@@ -77,11 +81,11 @@ public record CasdoorSettings(
     return this;
   }
 
-  public Optional<AppAuthConfig> appAuthConfig(String app) {
-    if (url == null || app == null) return Optional.empty();
-    return Optional.ofNullable(appClientIds.get(appKey(app)))
-      .filter(id -> !id.equals(clientId))
-      .map(id -> new AppAuthConfig(url, id));
+  public AppAuthConfig appAuthConfig(String app) {
+    if (url == null || app == null) return new AppAuthConfig(url, null);
+    String appClientId = appClientIds.get(appKey(app));
+    if (appClientId == null || appClientId.equals(clientId)) return new AppAuthConfig(url, null);
+    return new AppAuthConfig(url, appClientId);
   }
 
   public String jwkSetUri() {
