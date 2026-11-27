@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Getter;
 import lombok.Setter;
 import org.endeavourhealth.imapi.model.imq.*;
+import org.endeavourhealth.imapi.model.tripletree.TTArray;
 import org.endeavourhealth.imapi.queryengine.LogicOptimizer;
 import org.endeavourhealth.imapi.logic.service.QueryService;
 import org.endeavourhealth.imapi.model.customexceptions.EQDException;
@@ -282,7 +283,7 @@ public class EqdToIMQ {
       for (TTEntity report : this.document.getEntities()) {
         if (report.get(IM.DEFINITION) != null) {
           Query query = report.get(IM.DEFINITION).asLiteral().objectValue(Query.class);
-          this.checkGms(query);
+          this.checkGms(query,report);
           queryService.checkDependency(report,query);
           report.set(IM.DEFINITION.asIri(), TTLiteral.literal(query));
         }
@@ -396,26 +397,32 @@ public class EqdToIMQ {
   }
 
 
-  private void checkGms(Query query) {
+  private void checkGms(Query query,TTEntity report) {
     if (query.getRule() != null) {
       for (Query subQuery : query.getRule()) {
-        this.checkGmsClause(subQuery);
+        this.checkGmsClause(subQuery,report);
       }
     }
 
     if (query.getColumnGroup() != null) {
       for (Query subQuery : query.getColumnGroup()) {
-        this.checkGmsClause(subQuery);
+        this.checkGmsClause(subQuery,report);
       }
     }
 
   }
 
-  private void checkGmsClause(Query query) {
+  private void checkGmsClause(Query query,TTEntity report) {
     if (query.getIs() != null) {
       Node node = query.getIs();
       if (gmsPatients.contains(node.getIri())) {
+        String oldIri= node.getIri();
         node.setIri(NAMESPACE.IM + "Q_RegisteredGMS").setName("Registered and GP for GMS services on the reference date");
+        TTArray dependents = report.get(iri(IM.DEPENDENT_ON));
+        if (dependents != null) {
+          dependents.remove(iri(oldIri));
+          report.addObject(iri(IM.DEPENDENT_ON), iri(node.getIri()));
+        }
       }
     }
   }

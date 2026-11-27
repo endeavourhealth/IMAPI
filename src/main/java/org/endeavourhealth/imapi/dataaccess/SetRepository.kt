@@ -932,42 +932,43 @@ class SetRepository {
         }
         union {
           ?entailed im:is ?parent.
-          ?entailed im:entailment im:DescendantsOrSelfOf.
+          ?entailed im:entailment "<<".
           ?member im:isA ?parent.
         }
         union {
           ?entailed im:is ?parent.
-          ?entailed im:entailment im:DescendantsOf.
+          ?entailed im:entailment "<".
           ?member im:isA ?parent.
           filter (?member!=?parent)
         }
         union {
           ?entailed im:is ?child.
-          ?entailed im:entailment im:AncestorsOf.
+          ?entailed im:entailment ">".
           ?child im:isA ?member.
         }
         filter not exists {
           ?member im:isA ?parent2.
           ?parent2 ^im:is ?entailment2.
-          ?entailment2 im:entailment im:DescendantsOrSelfOf.
+          ?entailment2 im:entailment "<<".
           ?entailment2 im:exclude true.
         }
         filter not exists {
           ?member im:isA ?parent2.
           filter (?member!=?parent2)
           ?parent2 ^im:is ?entailment2.
-          ?entailment2 im:entailment im:DescendantsOf.
+          ?entailment2 im:entailment "<".
           ?entailment2 im:exclude true.
         }
         filter not exists {
           ?parent2 im:isA ?member.
           ?parent2 ^im:is ?entailment2.
-          ?entailment2 im:entailment im:AncestorsOf.
+          ?entailment2 im:entailment ">".
           ?entailment2 im:exclude true.
         }
       }
       
       """.trimIndent()
+
     val expansion: MutableSet<Concept> = mutableSetOf()
     IMDB.getConnection().use { conn ->
       val qry = conn.prepareTupleSparql(sql)
