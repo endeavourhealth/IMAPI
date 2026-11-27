@@ -30,10 +30,25 @@ Tokens issued with the `client_credentials` grant (server-to-server, e.g. the IM
 | `CASDOOR_ORGANISATION_NAME` | The Casdoor organisation that owns the users. |
 | `CASDOOR_CLIENT_ID`, `CASDOOR_CLIENT_SECRET` | The Casdoor application IMAPI uses for management calls (read users, update preferences, enforce). |
 | `CASDOOR_ENFORCER_ID` | The casbin enforcer (`owner/name`) consulted for authorisation. |
-| `CASDOOR_ALLOWED_CLIENT_IDS` | Comma-separated client ids (token audiences) of the applications whose tokens are accepted, e.g. IMQueryRunner and IMDirectory. |
+| `CASDOOR_APP_<NAME>_CLIENT_ID` | Client id of a named frontend application, e.g. `CASDOOR_APP_IMDIRECTORY_CLIENT_ID`. Its tokens are accepted, and the frontend reads it from `GET /api/config/public/auth?app=<name>` (see below). |
+| `CASDOOR_ALLOWED_CLIENT_IDS` | Comma-separated client ids (token audiences) of further applications whose tokens are accepted, e.g. third-party machine clients. The `CASDOOR_APP_…` ids need not be repeated here. |
 | `CASDOOR_JWS_ALGORITHM` | Optional. Signing algorithm of access tokens. Default `RS256`. |
 
 Casdoor is only contacted when a request needs it, so the app starts (and serves public endpoints) without these set.
+
+### Frontend sign-in settings
+
+Frontends do not configure Casdoor themselves. At startup they call the public endpoint
+
+```
+GET /api/config/public/auth?app=IMDirectory
+→ 200 { "url": "<CASDOOR_URL>", "clientId": "<CASDOOR_APP_IMDIRECTORY_CLIENT_ID>" }
+→ 200 { "url": "<CASDOOR_URL>", "clientId": null }      (sign-in not configured for the app)
+```
+
+The app name is matched case-insensitively, with any run of other characters treated as `_` (`im-query-runner` finds `CASDOOR_APP_IM_QUERY_RUNNER_CLIENT_ID`). When `CASDOOR_URL` or the app's client id is not set it still answers `200`, with `"clientId": null`, and the frontend then disables sign-in. A `404` therefore only means the endpoint was not found (wrong address, or an IMAPI without it), which frontends treat as an error rather than as "no sign-in". It never returns IMAPI's own `CASDOOR_CLIENT_ID`: an app variable holding that id is ignored here, and authenticated requests fail with an error naming that variable until it is removed.
+
+Browsers use the returned `url`, so `CASDOOR_URL` must be Casdoor's public address, and Casdoor's own `origin` setting should be the same URL so that the token issuer matches.
 
 ## Authorisation
 
